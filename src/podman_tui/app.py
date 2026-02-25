@@ -1,7 +1,7 @@
 """Main TUI application."""
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header
 from textual.app import App
 from textual.binding import Binding
@@ -46,26 +46,18 @@ class PodmanTUI(App):
         width: 1fr;
         height: 50%;
         border: solid $primary;
-        background: $surface;
-    }
-
-    #logs-system-container {
-        width: 1fr;
-        height: 50%;
     }
 
     #logs-pane {
-        width: 50%;
-        height: 1fr;
+        width: 1fr;
+        height: 50%;
         border: solid $primary;
-        background: $surface;
     }
 
     #system-df-pane {
-        width: 50%;
+        width: 1fr;
         height: 1fr;
         border: solid $primary;
-        background: $surface;
     }
 
     #containers-title,
@@ -74,7 +66,6 @@ class PodmanTUI(App):
         height: 1;
         background: $boost;
         color: $text;
-        text-style: bold;
     }
 
     DataTable {
@@ -99,10 +90,11 @@ class PodmanTUI(App):
         yield Header(show_clock=True)
 
         with Vertical(id="main-container"):
-            with Vertical(id="containers-pane"):
-                yield ContainersPane(self.podman_service)
+            with Horizontal():
+                with Vertical(id="containers-pane"):
+                    yield ContainersPane(self.podman_service)
 
-            with Horizontal(id="logs-system-container"):
+            with Horizontal():
                 with Vertical(id="logs-pane"):
                     yield LogsPane(self.podman_service)
 
@@ -116,7 +108,7 @@ class PodmanTUI(App):
         self.title = "Podman TUI"
         self.sub_title = "Container Management Interface"
 
-        # Collect focusable panes
+        # Collect panes
         self.panes = [
             self.query_one("#containers-pane"),
             self.query_one("#logs-pane"),
@@ -126,19 +118,12 @@ class PodmanTUI(App):
         if self.panes:
             self.panes[0].focus()
 
-    def on_containers_pane_container_selected(self, message) -> None:
-        """Handle container selection from containers pane."""
-        # Update logs pane with selected container
-        logs_pane = self.query_one("#logs-pane", LogsPane)
-        logs_pane.set_container(message.container)
-
     def action_next_pane(self) -> None:
         """Move to next pane."""
         if not self.panes:
             return
         self.current_pane_index = (self.current_pane_index + 1) % len(self.panes)
         self.panes[self.current_pane_index].focus()
-        self.notify(f"Switched to pane {self.current_pane_index + 1}/{len(self.panes)}")
 
     def action_prev_pane(self) -> None:
         """Move to previous pane."""
@@ -146,33 +131,8 @@ class PodmanTUI(App):
             return
         self.current_pane_index = (self.current_pane_index - 1) % len(self.panes)
         self.panes[self.current_pane_index].focus()
-        self.notify(f"Switched to pane {self.current_pane_index + 1}/{len(self.panes)}")
 
     def action_show_help(self) -> None:
         """Show help information."""
-        help_text = """
-PODMAN TUI - Help
+        self.notify("Help: Use Tab/Shift+Tab to navigate panes, q to quit")
 
-Navigation:
-  Tab         - Next pane
-  Shift+Tab   - Previous pane
-  q           - Quit application
-  h           - Show this help
-
-Containers Pane:
-  s           - Stop selected container
-  t           - Start selected container
-  p           - Pause selected container
-  u           - Unpause selected container
-  d           - Delete selected container
-  r           - Refresh containers list
-  ↑/↓         - Navigate containers
-
-Logs Pane:
-  r           - Refresh logs
-  c           - Clear logs display
-
-System DF Pane:
-  Shows disk usage information for images, containers, and volumes
-"""
-        self.notify(help_text)

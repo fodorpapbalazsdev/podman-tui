@@ -1,6 +1,5 @@
 """System disk usage pane widget."""
 
-from textual.app import ComposeResult
 from textual.widgets import Static
 
 from ..models import SystemDFInfo

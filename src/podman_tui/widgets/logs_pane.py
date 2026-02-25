@@ -1,7 +1,6 @@
 """Logs pane widget."""
 
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
 from textual.widgets import RichLog, Static
 from textual.binding import Binding
 

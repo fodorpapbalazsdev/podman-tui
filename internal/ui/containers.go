@@ -118,7 +118,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
 				cmds = append(cmds, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.StopContainer(id)}
+					return ContainerActionDoneMsg{Err: m.service.StartContainer(id)}
 				})
 			}
 
@@ -126,7 +126,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
 				cmds = append(cmds, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.StartContainer(id)}
+					return ContainerActionDoneMsg{Err: m.service.StopContainer(id)}
 				})
 			}
 
@@ -181,7 +181,7 @@ func (m ContainersModel) View() string {
 		body = colorizeTableStatuses(m.table.View())
 	}
 
-	help := statusStyle.Render("r:refresh  s:stop  t:start  p:pause  u:unpause  d:delete  l:logs")
+	help := statusStyle.Render("r:refresh  s:start  t:stop  p:pause  u:unpause  d:delete  l:logs")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help)
 }
 

@@ -1,6 +1,7 @@
 """Containers pane widget."""
 
 from textual.app import ComposeResult
+from textual.message import Message
 from textual.widgets import DataTable, Static
 from textual.binding import Binding
 
@@ -11,6 +12,12 @@ from ..services.podman_service import PodmanService
 class ContainersPane(Static):
     """Pane for displaying containers."""
 
+    class ShowLogs(Message):
+        """Request to show logs for a container."""
+        def __init__(self, container: ContainerModel) -> None:
+            super().__init__()
+            self.container = container
+
     BINDINGS = [
         Binding("s", "stop", "Stop"),
         Binding("t", "start", "Start"),
@@ -18,6 +25,7 @@ class ContainersPane(Static):
         Binding("u", "unpause", "Unpause"),
         Binding("d", "delete", "Delete"),
         Binding("r", "refresh", "Refresh"),
+        Binding("l", "show_logs", "Logs"),
     ]
 
     def __init__(self, podman_service: PodmanService):
@@ -133,6 +141,11 @@ class ContainersPane(Static):
         if self.selected_container:
             self.podman_service.unpause_container(self.selected_container.id)
             self.load_containers()
+
+    def action_show_logs(self) -> None:
+        """Show logs for selected container."""
+        if self.selected_container:
+            self.post_message(self.ShowLogs(self.selected_container))
 
     def action_delete(self) -> None:
         """Delete selected container."""

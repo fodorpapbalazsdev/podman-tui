@@ -132,6 +132,11 @@ class PodmanTUI(App):
         self.current_pane_index = (self.current_pane_index - 1) % len(self.panes)
         self.panes[self.current_pane_index].focus()
 
+    def on_containers_pane_show_logs(self, message: ContainersPane.ShowLogs) -> None:
+        """Handle request to show logs for a container."""
+        logs_pane = self.query_one(LogsPane)
+        logs_pane.set_container(message.container)
+
     def action_show_help(self) -> None:
         """Show help information."""
         self.notify("Help: Use Tab/Shift+Tab to navigate panes, q to quit")

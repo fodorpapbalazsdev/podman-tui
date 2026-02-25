@@ -39,26 +39,19 @@ class ContainersPane(Static):
 
     def on_mount(self) -> None:
         """Mount the pane."""
+        table = self.query_one("#containers-table", DataTable)
+        table.add_columns("Name", "ID", "Image", "Status", "Ports", "Memory", "CPU")
         self.load_containers()
-        self.setup_table()
 
     def load_containers(self) -> None:
         """Load containers from Podman."""
         self.containers = self.podman_service.get_containers(all=True)
+        self._populate_table()
 
-    def setup_table(self) -> None:
-        """Setup the data table."""
+    def _populate_table(self) -> None:
+        """Repopulate the table with current containers."""
         table = self.query_one("#containers-table", DataTable)
-        table.add_columns(
-            "Name",
-            "ID",
-            "Image",
-            "Status",
-            "Ports",
-            "Memory",
-            "CPU",
-        )
-
+        table.clear()
         for container in self.containers:
             ports_str = self._format_ports(container.ports)
             table.add_row(
@@ -70,6 +63,7 @@ class ContainersPane(Static):
                 container.memory_usage or "-",
                 container.cpu_usage or "-",
             )
+        self.selected_container = self.containers[0] if self.containers else None
 
     def _format_ports(self, ports: list) -> str:
         """
@@ -110,8 +104,8 @@ class ContainersPane(Static):
 
         return ", ".join(formatted_ports) if formatted_ports else "-"
 
-    def on_data_table_row_selected(self, event) -> None:
-        """Handle row selection in the table."""
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Handle cursor movement in the table."""
         if event.cursor_row < len(self.containers):
             self.selected_container = self.containers[event.cursor_row]
 
@@ -120,36 +114,30 @@ class ContainersPane(Static):
         if self.selected_container:
             self.podman_service.stop_container(self.selected_container.id)
             self.load_containers()
-            self.setup_table()
 
     def action_start(self) -> None:
         """Start selected container."""
         if self.selected_container:
             self.podman_service.start_container(self.selected_container.id)
             self.load_containers()
-            self.setup_table()
 
     def action_pause(self) -> None:
         """Pause selected container."""
         if self.selected_container:
             self.podman_service.pause_container(self.selected_container.id)
             self.load_containers()
-            self.setup_table()
 
     def action_unpause(self) -> None:
         """Unpause selected container."""
         if self.selected_container:
             self.podman_service.unpause_container(self.selected_container.id)
             self.load_containers()
-            self.setup_table()
 
     def action_delete(self) -> None:
         """Delete selected container."""
-        # Implementation for delete
         pass
 
     def action_refresh(self) -> None:
         """Refresh containers list."""
         self.load_containers()
-        self.setup_table()
 

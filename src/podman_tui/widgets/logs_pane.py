@@ -37,7 +37,7 @@ class LogsPane(Static):
         """Focus the inner RichLog."""
         self.query_one(RichLog).focus()
 
-    def set_container(self, container: ContainerModel) -> None:
+    async def set_container(self, container: ContainerModel) -> None:
         """
         Set the container to display logs for.
 
@@ -45,14 +45,14 @@ class LogsPane(Static):
             container: Container to display logs for
         """
         self.current_container = container
-        self.load_logs()
+        await self.load_logs()
 
-    def load_logs(self) -> None:
+    async def load_logs(self) -> None:
         """Load logs from Podman."""
         if not self.current_container:
             return
 
-        self.logs = self.podman_service.get_container_logs(
+        self.logs = await self.podman_service.get_container_logs(
             self.current_container.id
         )
         self.display_logs()
@@ -78,7 +78,6 @@ class LogsPane(Static):
         log_display = self.query_one("#logs-display", RichLog)
         log_display.clear()
 
-    def action_refresh(self) -> None:
+    async def action_refresh(self) -> None:
         """Refresh logs."""
-        self.load_logs()
-
+        await self.load_logs()

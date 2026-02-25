@@ -1,7 +1,7 @@
 """Podman service for executing podman commands."""
 
+import asyncio
 import json
-import subprocess
 from datetime import datetime
 from typing import Optional
 
@@ -15,9 +15,9 @@ class PodmanService:
         """Initialize Podman service."""
         self.podman_cmd = "podman"
 
-    def _run_command(self, cmd: list[str]) -> tuple[str, str, int]:
+    async def _run_command(self, cmd: list[str]) -> tuple[str, str, int]:
         """
-        Run a shell command.
+        Run a shell command asynchronously.
 
         Args:
             cmd: Command and arguments as list
@@ -26,19 +26,19 @@ class PodmanService:
             Tuple of (stdout, stderr, returncode)
         """
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            return result.stdout, result.stderr, result.returncode
-        except subprocess.TimeoutExpired:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+            return stdout.decode(), stderr.decode(), proc.returncode
+        except asyncio.TimeoutError:
             return "", "Command timeout", 1
         except FileNotFoundError:
             return "", "Podman not found", 1
 
-    def get_containers(self, all: bool = False) -> list[Container]:
+    async def get_containers(self, all: bool = False) -> list[Container]:
         """
         Get list of containers.
 
@@ -52,7 +52,11 @@ class PodmanService:
         if all:
             cmd.insert(2, "-a")
 
-        stdout, stderr, returncode = self._run_command(cmd)
+        # Fetch container list and stats in parallel
+        (stdout, stderr, returncode), stats_map = await asyncio.gather(
+            self._run_command(cmd),
+            self._get_stats_map(),
+        )
 
         if returncode != 0:
             return []
@@ -61,8 +65,6 @@ class PodmanService:
             data = json.loads(stdout)
         except json.JSONDecodeError:
             return []
-
-        stats_map = self._get_stats_map()
 
         containers = []
         for item in data:
@@ -83,9 +85,9 @@ class PodmanService:
             containers.append(container)
         return containers
 
-    def _get_stats_map(self) -> dict:
+    async def _get_stats_map(self) -> dict:
         """Get stats for all running containers, keyed by short container ID."""
-        stdout, _, returncode = self._run_command(
+        stdout, _, returncode = await self._run_command(
             [self.podman_cmd, "stats", "--no-stream", "--format=json"]
         )
         if returncode != 0:
@@ -96,7 +98,7 @@ class PodmanService:
         except (json.JSONDecodeError, AttributeError):
             return {}
 
-    def stop_container(self, container_id: str) -> bool:
+    async def stop_container(self, container_id: str) -> bool:
         """
         Stop a container.
 
@@ -106,12 +108,12 @@ class PodmanService:
         Returns:
             True if successful
         """
-        _, _, returncode = self._run_command(
+        _, _, returncode = await self._run_command(
             [self.podman_cmd, "stop", container_id]
         )
         return returncode == 0
 
-    def start_container(self, container_id: str) -> bool:
+    async def start_container(self, container_id: str) -> bool:
         """
         Start a container.
 
@@ -121,12 +123,12 @@ class PodmanService:
         Returns:
             True if successful
         """
-        _, _, returncode = self._run_command(
+        _, _, returncode = await self._run_command(
             [self.podman_cmd, "start", container_id]
         )
         return returncode == 0
 
-    def pause_container(self, container_id: str) -> bool:
+    async def pause_container(self, container_id: str) -> bool:
         """
         Pause a container.
 
@@ -136,12 +138,12 @@ class PodmanService:
         Returns:
             True if successful
         """
-        _, _, returncode = self._run_command(
+        _, _, returncode = await self._run_command(
             [self.podman_cmd, "pause", container_id]
         )
         return returncode == 0
 
-    def unpause_container(self, container_id: str) -> bool:
+    async def unpause_container(self, container_id: str) -> bool:
         """
         Unpause a container.
 
@@ -151,12 +153,12 @@ class PodmanService:
         Returns:
             True if successful
         """
-        _, _, returncode = self._run_command(
+        _, _, returncode = await self._run_command(
             [self.podman_cmd, "unpause", container_id]
         )
         return returncode == 0
 
-    def remove_container(self, container_id: str, force: bool = False) -> bool:
+    async def remove_container(self, container_id: str, force: bool = False) -> bool:
         """
         Remove a container.
 
@@ -172,10 +174,10 @@ class PodmanService:
             cmd.append("-f")
         cmd.append(container_id)
 
-        _, _, returncode = self._run_command(cmd)
+        _, _, returncode = await self._run_command(cmd)
         return returncode == 0
 
-    def get_container_logs(
+    async def get_container_logs(
         self, container_id: str, lines: int = 100, follow: bool = False
     ) -> list[LogEntry]:
         """
@@ -200,7 +202,7 @@ class PodmanService:
 
         cmd.append(container_id)
 
-        stdout, stderr, returncode = self._run_command(cmd)
+        stdout, stderr, returncode = await self._run_command(cmd)
 
         if returncode != 0:
             return [LogEntry(datetime.now(), f"Error: {stderr}", "ERROR")]
@@ -210,7 +212,6 @@ class PodmanService:
             if not line:
                 continue
             try:
-                # Parse timestamp and message
                 parts = line.split(" ", 1)
                 if len(parts) == 2:
                     timestamp_str, message = parts
@@ -223,7 +224,7 @@ class PodmanService:
 
         return logs
 
-    def get_system_df(self) -> Optional[SystemDFInfo]:
+    async def get_system_df(self) -> Optional[SystemDFInfo]:
         """
         Get system disk usage.
 
@@ -231,7 +232,7 @@ class PodmanService:
             SystemDFInfo object or None if error
         """
         cmd = [self.podman_cmd, "system", "df", "--format=json"]
-        stdout, stderr, returncode = self._run_command(cmd)
+        stdout, stderr, returncode = await self._run_command(cmd)
 
         if returncode != 0:
             return None
@@ -375,7 +376,6 @@ class PodmanService:
         except ValueError:
             pass
 
-        # If all parsing fails, return current time
         return datetime.now()
 
     @staticmethod
@@ -398,4 +398,3 @@ class PodmanService:
                 return f"{size_bytes:.1f} {unit}"
             size_bytes /= 1024
         return f"{size_bytes:.1f} TB"
-

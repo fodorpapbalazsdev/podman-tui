@@ -49,16 +49,16 @@ class ContainersPane(Static):
         """Focus the inner DataTable."""
         self.query_one(DataTable).focus()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Mount the pane."""
         table = self.query_one("#containers-table", DataTable)
         table.cursor_type = "row"
         table.add_columns("Name", "ID", "Image", "Status", "Ports", "Memory", "CPU")
-        self.load_containers()
+        await self.load_containers()
 
-    def load_containers(self) -> None:
+    async def load_containers(self) -> None:
         """Load containers from Podman."""
-        self.containers = self.podman_service.get_containers(all=True)
+        self.containers = await self.podman_service.get_containers(all=True)
         self._populate_table()
 
     def _populate_table(self) -> None:
@@ -94,7 +94,6 @@ class ContainersPane(Static):
         formatted_ports = []
         for port in ports:
             if isinstance(port, dict):
-                # Handle port dictionary format
                 host_ip = port.get("host_ip", "")
                 host_port = port.get("host_port", "")
                 container_port = port.get("container_port", "")
@@ -112,7 +111,6 @@ class ContainersPane(Static):
                 elif container_port:
                     formatted_ports.append(f"{container_port}/{protocol}")
             elif isinstance(port, str):
-                # Handle string format
                 formatted_ports.append(port)
 
         return ", ".join(formatted_ports) if formatted_ports else "-"
@@ -122,29 +120,29 @@ class ContainersPane(Static):
         if event.cursor_row < len(self.containers):
             self.selected_container = self.containers[event.cursor_row]
 
-    def action_stop(self) -> None:
+    async def action_stop(self) -> None:
         """Stop selected container."""
         if self.selected_container:
-            self.podman_service.stop_container(self.selected_container.id)
-            self.load_containers()
+            await self.podman_service.stop_container(self.selected_container.id)
+            await self.load_containers()
 
-    def action_start(self) -> None:
+    async def action_start(self) -> None:
         """Start selected container."""
         if self.selected_container:
-            self.podman_service.start_container(self.selected_container.id)
-            self.load_containers()
+            await self.podman_service.start_container(self.selected_container.id)
+            await self.load_containers()
 
-    def action_pause(self) -> None:
+    async def action_pause(self) -> None:
         """Pause selected container."""
         if self.selected_container:
-            self.podman_service.pause_container(self.selected_container.id)
-            self.load_containers()
+            await self.podman_service.pause_container(self.selected_container.id)
+            await self.load_containers()
 
-    def action_unpause(self) -> None:
+    async def action_unpause(self) -> None:
         """Unpause selected container."""
         if self.selected_container:
-            self.podman_service.unpause_container(self.selected_container.id)
-            self.load_containers()
+            await self.podman_service.unpause_container(self.selected_container.id)
+            await self.load_containers()
 
     def action_show_logs(self) -> None:
         """Show logs for selected container."""
@@ -155,7 +153,6 @@ class ContainersPane(Static):
         """Delete selected container."""
         pass
 
-    def action_refresh(self) -> None:
+    async def action_refresh(self) -> None:
         """Refresh containers list."""
-        self.load_containers()
-
+        await self.load_containers()

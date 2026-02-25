@@ -27,13 +27,11 @@ class SystemDFPane(Static):
         self.df_info: SystemDFInfo | None = None
 
     def render(self) -> str:
-        """Render the pane."""
-        self.load_df()
-
+        """Render the pane using cached data (no subprocess calls here)."""
         if not self.df_info:
-            return "Unable to load system disk usage information"
+            return "Loading system disk usage..."
 
-        content = f"""
+        return f"""
 ╔═══════════════════════════════════════════════════════════╗
 ║              System Disk Usage (podman system df)          ║
 ╚═══════════════════════════════════════════════════════════╝
@@ -55,9 +53,12 @@ class SystemDFPane(Static):
 
 Last updated: {self.df_info.timestamp.strftime('%Y-%m-%d %H:%M:%S')}
 """
-        return content
 
-    def load_df(self) -> None:
-        """Load system disk usage information."""
-        self.df_info = self.podman_service.get_system_df()
+    async def on_mount(self) -> None:
+        """Load disk usage data on mount."""
+        await self.load_df()
 
+    async def load_df(self) -> None:
+        """Load system disk usage information asynchronously."""
+        self.df_info = await self.podman_service.get_system_df()
+        self.refresh()

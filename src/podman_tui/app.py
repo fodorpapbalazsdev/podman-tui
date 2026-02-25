@@ -186,10 +186,10 @@ class PodmanTUI(App):
         if not pane.display and self.current_pane_index == 2:
             self._focus_pane(0)
 
-    def on_containers_pane_show_logs(self, message: ContainersPane.ShowLogs) -> None:
+    async def on_containers_pane_show_logs(self, message: ContainersPane.ShowLogs) -> None:
         """Handle request to show logs for a container."""
         logs_pane = self.query_one(LogsPane)
-        logs_pane.set_container(message.container)
+        await logs_pane.set_container(message.container)
 
     def action_show_help(self) -> None:
         """Show help information."""

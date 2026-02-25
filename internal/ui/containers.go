@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
@@ -11,6 +12,8 @@ import (
 	"github.com/fpbpi/podman-tui/internal/models"
 	"github.com/fpbpi/podman-tui/internal/podman"
 )
+
+const autoRefreshInterval = 3 * time.Second
 
 // ContainersModel is the Bubble Tea model for the containers pane.
 type ContainersModel struct {
@@ -72,8 +75,14 @@ func (m ContainersModel) fetchContainers() tea.Cmd {
 	}
 }
 
+func tickRefresh() tea.Cmd {
+	return tea.Tick(autoRefreshInterval, func(time.Time) tea.Msg {
+		return autoRefreshMsg{}
+	})
+}
+
 func (m ContainersModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchContainers())
+	return tea.Batch(m.spinner.Tick, m.fetchContainers(), tickRefresh())
 }
 
 func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
@@ -94,6 +103,12 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			m.containers = msg.Containers
 			m.table.SetRows(containersToRows(msg.Containers))
 		}
+
+	case autoRefreshMsg:
+		if !m.loading {
+			cmds = append(cmds, m.fetchContainers())
+		}
+		cmds = append(cmds, tickRefresh())
 
 	case ContainerActionDoneMsg:
 		m.err = msg.Err
@@ -181,7 +196,7 @@ func (m ContainersModel) View() string {
 		body = colorizeTableStatuses(m.table.View())
 	}
 
-	help := statusStyle.Render("r:refresh  s:start  t:stop  p:pause  u:unpause  d:delete  l:logs")
+	help := statusStyle.Render("r:refresh  s:start  t:stop  p:pause  u:unpause  d:delete  l:logs  (auto-refresh 3s)")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help)
 }
 

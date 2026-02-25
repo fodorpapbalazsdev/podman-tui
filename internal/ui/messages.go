@@ -33,3 +33,6 @@ type ShowLogsMsg struct {
 
 // BackToContainersMsg is sent from the logs window when the user presses Esc.
 type BackToContainersMsg struct{}
+
+// autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
+type autoRefreshMsg struct{}

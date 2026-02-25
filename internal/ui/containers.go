@@ -178,7 +178,7 @@ func (m ContainersModel) View() string {
 	} else if m.err != nil {
 		body = errorStyle.Render("Error: " + m.err.Error())
 	} else {
-		body = m.table.View()
+		body = colorizeTableStatuses(m.table.View())
 	}
 
 	help := statusStyle.Render("r:refresh  s:stop  t:start  p:pause  u:unpause  d:delete  l:logs")
@@ -262,6 +262,33 @@ func containersToRows(containers []models.Container) []table.Row {
 		})
 	}
 	return rows
+}
+
+// colorizeTableStatuses injects ANSI foreground colors into an already-rendered
+// table string. The bubbles table uses runewidth.Truncate (which counts visible
+// chars inside escape sequences) before lipgloss renders each cell, so embedding
+// ANSI codes in cell values causes premature truncation. Post-processing the
+// rendered output avoids that. \x1b[39m resets only the foreground so that the
+// selected-row background highlight is not wiped out.
+func colorizeTableStatuses(s string) string {
+	const statusColWidth = 10
+	for _, entry := range []struct {
+		status models.ContainerStatus
+		code   string
+	}{
+		{models.StatusRunning, "82"},
+		{models.StatusExited, "196"},
+		{models.StatusPaused, "214"},
+		{models.StatusCreated, "39"},
+	} {
+		text := string(entry.status)
+		pad := strings.Repeat(" ", statusColWidth-len(text))
+		s = strings.ReplaceAll(s,
+			text+pad,
+			fmt.Sprintf("\x1b[38;5;%sm%s\x1b[39m%s", entry.code, text, pad),
+		)
+	}
+	return s
 }
 
 func formatPorts(ports []models.PortMapping) string {

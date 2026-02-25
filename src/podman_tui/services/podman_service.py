@@ -59,24 +59,42 @@ class PodmanService:
 
         try:
             data = json.loads(stdout)
-            containers = []
-            for item in data:
-                status = self._parse_status(item.get("State", "unknown"))
-                container = Container(
-                    id=item.get("Id", "")[:12],
-                    name=item.get("Names", ["unknown"])[0],
-                    status=status,
-                    image=item.get("Image", "unknown"),
-                    created=self._parse_datetime(item.get("Created", "")),
-                    started=self._parse_datetime(item.get("StartedAt", "")),
-                    ports=item.get("Ports", []) or [],
-                    memory_usage=item.get("MemUsage", ""),
-                    cpu_usage=item.get("CPUUsage", ""),
-                )
-                containers.append(container)
-            return containers
         except json.JSONDecodeError:
             return []
+
+        stats_map = self._get_stats_map()
+
+        containers = []
+        for item in data:
+            container_id = item.get("Id", "")[:12]
+            stats = stats_map.get(container_id, {})
+            status = self._parse_status(item.get("State", "unknown"))
+            container = Container(
+                id=container_id,
+                name=item.get("Names", ["unknown"])[0],
+                status=status,
+                image=item.get("Image", "unknown"),
+                created=self._parse_datetime(item.get("Created", "")),
+                started=self._parse_datetime(item.get("StartedAt", "")),
+                ports=item.get("Ports", []) or [],
+                memory_usage=stats.get("mem_usage", ""),
+                cpu_usage=stats.get("cpu_percent", ""),
+            )
+            containers.append(container)
+        return containers
+
+    def _get_stats_map(self) -> dict:
+        """Get stats for all running containers, keyed by short container ID."""
+        stdout, _, returncode = self._run_command(
+            [self.podman_cmd, "stats", "--no-stream", "--format=json"]
+        )
+        if returncode != 0:
+            return {}
+        try:
+            data = json.loads(stdout)
+            return {item.get("id", item.get("ID", ""))[:12]: item for item in data}
+        except (json.JSONDecodeError, AttributeError):
+            return {}
 
     def stop_container(self, container_id: str) -> bool:
         """

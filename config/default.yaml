@@ -1,0 +1,29 @@
+# Podman TUI Configuration
+
+refresh_interval: 2
+log_lines: 100
+show_all_containers: true
+theme: dark
+
+keybindings:
+  quit: q
+  refresh: r
+  stop_container: s
+  start_container: t
+  pause_container: p
+  unpause_container: u
+  delete_container: d
+  next_pane: tab
+  prev_pane: shift+tab
+  select_up: up
+  select_down: down
+  help: h
+
+# UI Settings
+ui:
+  header_height: 1
+  footer_height: 1
+  containers_pane_height: 50
+  logs_pane_height: 25
+  system_df_pane_height: 25
+

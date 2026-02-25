@@ -20,6 +20,10 @@ class PodmanTUI(App):
         Binding("q", "quit", "Quit"),
         Binding("tab", "next_pane", "Next Pane"),
         Binding("shift+tab", "prev_pane", "Previous Pane"),
+        Binding("f1", "focus_containers", "Containers"),
+        Binding("f2", "focus_logs", "Logs"),
+        Binding("f3", "focus_system_df", "System DF"),
+        Binding("f4", "toggle_system_df", "Toggle System DF"),
         Binding("h", "show_help", "Help"),
     ]
 
@@ -45,19 +49,25 @@ class PodmanTUI(App):
     #containers-pane {
         width: 1fr;
         height: 50%;
-        border: solid $primary;
+        border: solid $surface-lighten-2;
     }
 
     #logs-pane {
         width: 1fr;
         height: 50%;
-        border: solid $primary;
+        border: solid $surface-lighten-2;
     }
 
     #system-df-pane {
         width: 1fr;
         height: 1fr;
-        border: solid $primary;
+        border: solid $surface-lighten-2;
+    }
+
+    #containers-pane:focus-within,
+    #logs-pane:focus-within,
+    #system-df-pane:focus-within {
+        border: solid $accent;
     }
 
     #containers-title,
@@ -116,21 +126,65 @@ class PodmanTUI(App):
         ]
 
         if self.panes:
-            self.panes[0].focus()
+            self._focus_pane(0)
+
+    def _visible_panes(self) -> list:
+        return [p for p in self.panes if p.display]
+
+    def _focus_pane(self, index: int) -> None:
+        self.current_pane_index = index
+        container = self.panes[index]
+        if index == 0:
+            container.query_one(ContainersPane).focus_inner()
+        elif index == 1:
+            container.query_one(LogsPane).focus_inner()
+        elif index == 2:
+            container.query_one(SystemDFPane).focus_inner()
 
     def action_next_pane(self) -> None:
-        """Move to next pane."""
-        if not self.panes:
+        """Move to next visible pane."""
+        visible = self._visible_panes()
+        if not visible:
             return
-        self.current_pane_index = (self.current_pane_index + 1) % len(self.panes)
-        self.panes[self.current_pane_index].focus()
+        try:
+            current = visible.index(self.panes[self.current_pane_index])
+            next_pane = visible[(current + 1) % len(visible)]
+        except ValueError:
+            next_pane = visible[0]
+        self._focus_pane(self.panes.index(next_pane))
 
     def action_prev_pane(self) -> None:
-        """Move to previous pane."""
-        if not self.panes:
+        """Move to previous visible pane."""
+        visible = self._visible_panes()
+        if not visible:
             return
-        self.current_pane_index = (self.current_pane_index - 1) % len(self.panes)
-        self.panes[self.current_pane_index].focus()
+        try:
+            current = visible.index(self.panes[self.current_pane_index])
+            next_pane = visible[(current - 1) % len(visible)]
+        except ValueError:
+            next_pane = visible[-1]
+        self._focus_pane(self.panes.index(next_pane))
+
+    def action_focus_containers(self) -> None:
+        """Focus the containers pane."""
+        self._focus_pane(0)
+
+    def action_focus_logs(self) -> None:
+        """Focus the logs pane."""
+        self._focus_pane(1)
+
+    def action_focus_system_df(self) -> None:
+        """Focus the system DF pane."""
+        pane = self.panes[2]
+        if pane.display:
+            self._focus_pane(2)
+
+    def action_toggle_system_df(self) -> None:
+        """Toggle visibility of the system DF pane."""
+        pane = self.panes[2]
+        pane.display = not pane.display
+        if not pane.display and self.current_pane_index == 2:
+            self._focus_pane(0)
 
     def on_containers_pane_show_logs(self, message: ContainersPane.ShowLogs) -> None:
         """Handle request to show logs for a container."""

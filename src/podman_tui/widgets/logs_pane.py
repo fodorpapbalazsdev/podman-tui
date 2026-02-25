@@ -33,6 +33,10 @@ class LogsPane(Static):
         yield Static("Logs", id="logs-title")
         yield RichLog(id="logs-display")
 
+    def focus_inner(self) -> None:
+        """Focus the inner RichLog."""
+        self.query_one(RichLog).focus()
+
     def set_container(self, container: ContainerModel) -> None:
         """
         Set the container to display logs for.

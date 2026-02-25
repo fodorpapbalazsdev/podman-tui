@@ -45,6 +45,10 @@ class ContainersPane(Static):
         yield Static("Containers", id="containers-title")
         yield DataTable(id="containers-table")
 
+    def focus_inner(self) -> None:
+        """Focus the inner DataTable."""
+        self.query_one(DataTable).focus()
+
     def on_mount(self) -> None:
         """Mount the pane."""
         table = self.query_one("#containers-table", DataTable)

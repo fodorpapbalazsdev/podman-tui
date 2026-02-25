@@ -9,6 +9,12 @@ from ..services.podman_service import PodmanService
 class SystemDFPane(Static):
     """Pane for displaying system disk usage."""
 
+    can_focus = True
+
+    def focus_inner(self) -> None:
+        """Focus this pane directly (no inner focusable child)."""
+        self.focus()
+
     def __init__(self, podman_service: PodmanService):
         """
         Initialize system df pane.

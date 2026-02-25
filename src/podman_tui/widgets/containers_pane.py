@@ -40,6 +40,7 @@ class ContainersPane(Static):
     def on_mount(self) -> None:
         """Mount the pane."""
         table = self.query_one("#containers-table", DataTable)
+        table.cursor_type = "row"
         table.add_columns("Name", "ID", "Image", "Status", "Ports", "Memory", "CPU")
         self.load_containers()
 

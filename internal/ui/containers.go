@@ -13,19 +13,20 @@ import (
 	"github.com/fpbpi/podman-tui/internal/podman"
 )
 
-const autoRefreshInterval = 3 * time.Second
+const autoRefreshInterval = 1 * time.Second
 
 // ContainersModel is the Bubble Tea model for the containers pane.
 type ContainersModel struct {
-	table     table.Model
-	spinner   spinner.Model
-	loading   bool
-	focused   bool
-	err       error
-	service   *podman.Service
+	table      table.Model
+	spinner    spinner.Model
+	loading    bool
+	fetching   bool // true while any fetchContainers goroutine is in flight
+	focused    bool
+	err        error
+	service    *podman.Service
 	containers []models.Container
-	width     int
-	height    int
+	width      int
+	height     int
 }
 
 func newContainersModel(svc *podman.Service) ContainersModel {
@@ -67,11 +68,20 @@ func newContainersModel(svc *podman.Service) ContainersModel {
 	}
 }
 
-// fetchContainers returns a tea.Cmd that loads containers in the background.
+// fetchContainers fetches containers with live CPU/memory stats (used on manual refresh).
 func (m ContainersModel) fetchContainers() tea.Cmd {
 	return func() tea.Msg {
-		cons, err := m.service.GetContainers(true)
-		return ContainersLoadedMsg{Containers: cons, Err: err}
+		cons, err := m.service.GetContainers(true, true)
+		return ContainersLoadedMsg{Containers: cons, Err: err, WithStats: true}
+	}
+}
+
+// fetchContainersLight fetches only container list/status, skipping the slow
+// podman-stats call. Used by the 1s auto-refresh tick.
+func (m ContainersModel) fetchContainersLight() tea.Cmd {
+	return func() tea.Msg {
+		cons, err := m.service.GetContainers(true, false)
+		return ContainersLoadedMsg{Containers: cons, Err: err, WithStats: false}
 	}
 }
 
@@ -98,21 +108,39 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 
 	case ContainersLoadedMsg:
 		m.loading = false
+		m.fetching = false
 		m.err = msg.Err
 		if msg.Err == nil {
-			m.containers = msg.Containers
-			m.table.SetRows(containersToRows(msg.Containers))
+			containers := msg.Containers
+			if !msg.WithStats {
+				// Preserve existing CPU/memory values — stats are only
+				// refreshed on manual refresh (r) or after an action.
+				cache := make(map[string]*models.Container, len(m.containers))
+				for i := range m.containers {
+					cache[m.containers[i].ID] = &m.containers[i]
+				}
+				for i := range containers {
+					if old, ok := cache[containers[i].ID]; ok {
+						containers[i].MemoryUsage = old.MemoryUsage
+						containers[i].CPUUsage = old.CPUUsage
+					}
+				}
+			}
+			m.containers = containers
+			m.table.SetRows(containersToRows(containers))
 		}
 
 	case autoRefreshMsg:
-		if !m.loading {
-			cmds = append(cmds, m.fetchContainers())
+		if !m.loading && !m.fetching {
+			m.fetching = true
+			cmds = append(cmds, m.fetchContainersLight())
 		}
 		cmds = append(cmds, tickRefresh())
 
 	case ContainerActionDoneMsg:
 		m.err = msg.Err
 		m.loading = true
+		m.fetching = true
 		cmds = append(cmds, m.spinner.Tick, m.fetchContainers())
 
 	case tea.KeyMsg:

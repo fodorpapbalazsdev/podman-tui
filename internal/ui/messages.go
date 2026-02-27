@@ -4,9 +4,12 @@ package ui
 import "github.com/fpbpi/podman-tui/internal/models"
 
 // ContainersLoadedMsg is sent when the container list has been fetched.
+// WithStats is false for lightweight auto-refresh fetches; the Update handler
+// will preserve the existing MemoryUsage/CPUUsage values in that case.
 type ContainersLoadedMsg struct {
 	Containers []models.Container
 	Err        error
+	WithStats  bool
 }
 
 // LogsLoadedMsg is sent when container logs have been fetched.

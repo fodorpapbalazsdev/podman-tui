@@ -98,14 +98,16 @@ func (s *Service) getStatsMap() (map[string]statsEntry, error) {
 	return result, nil
 }
 
-// GetContainers fetches the container list and live stats concurrently.
-func (s *Service) GetContainers(all bool) ([]models.Container, error) {
+// GetContainers fetches the container list and optionally live stats.
+// When withStats is false the stats goroutine is skipped; MemoryUsage and
+// CPUUsage will be empty strings for every container.
+func (s *Service) GetContainers(all, withStats bool) ([]models.Container, error) {
 	var (
-		wg         sync.WaitGroup
-		rawCons    []rawContainer
-		statsMap   map[string]statsEntry
-		psErr      error
-		statsErr   error
+		wg       sync.WaitGroup
+		rawCons  []rawContainer
+		statsMap map[string]statsEntry
+		psErr    error
+		statsErr error
 	)
 
 	// goroutine 1: podman ps --format json
@@ -124,12 +126,14 @@ func (s *Service) GetContainers(all bool) ([]models.Container, error) {
 		psErr = json.Unmarshal([]byte(stdout), &rawCons)
 	}()
 
-	// goroutine 2: podman stats
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		statsMap, statsErr = s.getStatsMap()
-	}()
+	// goroutine 2: podman stats (optional)
+	if withStats {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			statsMap, statsErr = s.getStatsMap()
+		}()
+	}
 
 	wg.Wait()
 

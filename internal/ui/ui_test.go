@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,4 +244,185 @@ func TestAppModel_CtrlCQuit(t *testing.T) {
 	require.NotNil(t, cmd)
 	_, ok := cmd().(tea.QuitMsg)
 	assert.True(t, ok, "expected tea.QuitMsg")
+}
+
+// ---- AppModel prune state machine ----
+
+func TestAppModel_PruneKey_SetsPruneConfirm(t *testing.T) {
+	m := NewAppModel(nil)
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
+	assert.True(t, newModel.(AppModel).pruneConfirm)
+}
+
+func TestAppModel_PruneConfirm_EnterDispatchesCmd(t *testing.T) {
+	m := NewAppModel(nil)
+	m.pruneConfirm = true
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.False(t, newModel.(AppModel).pruneConfirm, "confirm flag should be cleared")
+	assert.NotNil(t, cmd, "prune command should be dispatched")
+}
+
+func TestAppModel_PruneConfirm_EscCancels(t *testing.T) {
+	m := NewAppModel(nil)
+	m.pruneConfirm = true
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	assert.False(t, newModel.(AppModel).pruneConfirm, "confirm flag should be cleared")
+	assert.Nil(t, cmd, "no command should be dispatched on cancel")
+}
+
+func TestAppModel_PruneConfirm_OtherKeyCancels(t *testing.T) {
+	m := NewAppModel(nil)
+	m.pruneConfirm = true
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	assert.False(t, newModel.(AppModel).pruneConfirm)
+	assert.Nil(t, cmd)
+}
+
+func TestAppModel_PruneDoneMsg_Success(t *testing.T) {
+	m := NewAppModel(nil)
+	newModel, cmd := m.Update(PruneDoneMsg{Reclaimed: "293.8 MB"})
+	app := newModel.(AppModel)
+	assert.True(t, app.pruneDone)
+	assert.Equal(t, "293.8 MB", app.pruneReclaimed)
+	assert.NoError(t, app.pruneErr)
+	assert.NotNil(t, cmd, "refresh commands should be dispatched on success")
+}
+
+func TestAppModel_PruneDoneMsg_Error(t *testing.T) {
+	m := NewAppModel(nil)
+	newModel, cmd := m.Update(PruneDoneMsg{Err: fmt.Errorf("prune failed")})
+	app := newModel.(AppModel)
+	assert.True(t, app.pruneDone)
+	assert.Error(t, app.pruneErr)
+	assert.Nil(t, cmd, "no refresh should be dispatched on error")
+}
+
+func TestAppModel_PruneDone_AnyKeyDismisses(t *testing.T) {
+	m := NewAppModel(nil)
+	m.pruneDone = true
+	m.pruneReclaimed = "100 MB"
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	assert.False(t, newModel.(AppModel).pruneDone)
+	assert.Empty(t, newModel.(AppModel).pruneReclaimed)
+}
+
+func TestAppModel_PruneDone_EnterDismissesWithoutOpeningLogs(t *testing.T) {
+	m := NewAppModel(nil)
+	// Load a container so enter would normally trigger ShowLogsMsg.
+	cons := []models.Container{{ID: "abc123", Name: "web", Status: models.StatusRunning}}
+	m.containers, _ = m.containers.Update(ContainersLoadedMsg{Containers: cons, WithStats: true})
+	m.pruneDone = true
+
+	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	app := newModel.(AppModel)
+	assert.False(t, app.pruneDone, "dialog should be dismissed")
+	assert.False(t, app.showLogs, "logs must NOT be opened")
+}
+
+// ---- ContainersModel key bindings ----
+
+// containersModelWithSelection returns a focused ContainersModel with one loaded container.
+func containersModelWithSelection(t *testing.T) ContainersModel {
+	t.Helper()
+	m := newContainersModel(nil)
+	m.SetFocused(true)
+	cons := []models.Container{
+		{ID: "abc123def456", Name: "web", Status: models.StatusRunning},
+	}
+	m, _ = m.Update(ContainersLoadedMsg{Containers: cons, WithStats: true})
+	return m
+}
+
+func TestContainersModel_EnterKey_EmitsShowLogsMsg(t *testing.T) {
+	m := containersModelWithSelection(t)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, ok := msg.(ShowLogsMsg)
+	assert.True(t, ok, "enter should emit ShowLogsMsg")
+}
+
+func TestContainersModel_LKey_EmitsShowLogsMsg(t *testing.T) {
+	m := containersModelWithSelection(t)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	require.NotNil(t, cmd)
+	msg := cmd()
+	_, ok := msg.(ShowLogsMsg)
+	assert.True(t, ok, "l should emit ShowLogsMsg")
+}
+
+func TestContainersModel_ActionKeys_DispatchCmd(t *testing.T) {
+	keys := []struct {
+		name string
+		msg  tea.KeyMsg
+	}{
+		{"start (s)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}},
+		{"stop (t)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}},
+		{"pause (p)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}}},
+		{"unpause (u)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}}},
+		{"delete (d)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}},
+	}
+	for _, tc := range keys {
+		t.Run(tc.name, func(t *testing.T) {
+			m := containersModelWithSelection(t)
+			_, cmd := m.Update(tc.msg)
+			assert.NotNil(t, cmd, "key %q should dispatch a command when a container is selected", tc.name)
+		})
+	}
+}
+
+func TestContainersModel_ActionKeys_NoOpWithoutSelection(t *testing.T) {
+	// No containers loaded → no selection → action keys should be no-ops.
+	m := newContainersModel(nil)
+	m.SetFocused(true)
+	for _, r := range []rune{'l', 's', 't', 'p', 'u', 'd'} {
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		assert.Nil(t, cmd, "key %q should not dispatch when nothing is selected", string(r))
+	}
+}
+
+// ---- dimBackground ----
+
+func TestDimBackground_AddsDimPrefix(t *testing.T) {
+	result := dimBackground("hello")
+	assert.True(t, strings.HasPrefix(result, "\x1b[2m"), "should start with dim code")
+	assert.Contains(t, result, "hello")
+	assert.True(t, strings.HasSuffix(result, "\x1b[0m"), "should end with reset")
+}
+
+func TestDimBackground_ReinsertsDimAfterReset(t *testing.T) {
+	result := dimBackground("foo\x1b[0mbar")
+	assert.Contains(t, result, "\x1b[0m\x1b[2m", "dim should be reinserted after every reset")
+	assert.Contains(t, result, "foo")
+	assert.Contains(t, result, "bar")
+}
+
+// ---- placeOverlay ----
+
+func TestPlaceOverlay_CentersDialogOnBackground(t *testing.T) {
+	// 10-wide × 5-tall background of 'A's.
+	bgLine := strings.Repeat("A", 10)
+	bg := strings.Join([]string{bgLine, bgLine, bgLine, bgLine, bgLine}, "\n")
+
+	fg := "XXXX" // 4 wide, 1 tall → centered at x=3, y=2
+
+	result := placeOverlay(fg, bg, 10, 5)
+	lines := strings.Split(result, "\n")
+
+	require.Len(t, lines, 5)
+	// Row 2 (0-indexed) should contain the dialog content.
+	assert.Contains(t, lines[2], "XXXX")
+	// Surrounding rows should remain unchanged.
+	assert.Equal(t, bgLine, lines[0])
+	assert.Equal(t, bgLine, lines[4])
+}
+
+func TestPlaceOverlay_PadsShortBackgroundLines(t *testing.T) {
+	// Background lines shorter than startX should be padded with spaces.
+	bg := strings.Join([]string{"AB", "AB", "AB"}, "\n")
+	fg := "X" // 1 wide, centered at x=4 in a 10-wide terminal
+
+	// Should not panic.
+	result := placeOverlay(fg, bg, 10, 3)
+	assert.NotEmpty(t, result)
 }

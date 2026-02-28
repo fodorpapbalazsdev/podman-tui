@@ -79,6 +79,10 @@ func runMockPodman() {
 	case "system":
 		if len(os.Args) > 2 && os.Args[2] == "df" {
 			fmt.Println(mockSystemDFJSON)
+		} else if len(os.Args) > 2 && os.Args[2] == "prune" {
+			if os.Getenv("GO_PODMAN_PRUNE_EMPTY") != "1" {
+				fmt.Println("Total reclaimed space: 293.8 MB")
+			}
 		}
 	case "machine":
 		if len(os.Args) > 2 && os.Args[2] == "inspect" {
@@ -263,4 +267,28 @@ func TestRemoveContainer(t *testing.T) {
 
 func TestRemoveContainer_Force(t *testing.T) {
 	assert.NoError(t, mockService(t).RemoveContainer("abc123", true))
+}
+
+// ---- SystemPrune ----
+
+func TestSystemPrune_Success(t *testing.T) {
+	reclaimed, err := mockService(t).SystemPrune()
+	require.NoError(t, err)
+	assert.Equal(t, "293.8 MB", reclaimed)
+}
+
+func TestSystemPrune_NothingReclaimed(t *testing.T) {
+	// When podman outputs no "Total reclaimed space:" line, reclaimed is empty.
+	svc := mockService(t)
+	t.Setenv("GO_PODMAN_PRUNE_EMPTY", "1")
+	reclaimed, err := svc.SystemPrune()
+	require.NoError(t, err)
+	assert.Empty(t, reclaimed)
+}
+
+func TestSystemPrune_Failure(t *testing.T) {
+	svc := mockService(t)
+	t.Setenv("GO_PODMAN_MOCK_FAIL", "system")
+	_, err := svc.SystemPrune()
+	require.Error(t, err)
 }

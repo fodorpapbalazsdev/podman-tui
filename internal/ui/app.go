@@ -10,10 +10,18 @@ import (
 //
 // Layout:
 //
-//	┌──────────────────────────────────────┐  ← header: SystemDF bar (1 line)
-//	│ containers table  OR  log viewer     │  ← main content (fills remaining height)
-//	└──────────────────────────────────────┘
-//	  status / keybinding hint              ← 1 line
+//	╭──────────────────────────────────────╮
+//	│ podman-tui                 15:04:05  │  ← title row
+//	│──────────────────────────────────────│  ← divider
+//	│ Machine: …  │  Images: …             │  ← header body (4 rows)
+//	│ CPU: …      │  Containers: …         │
+//	│ Mem: …      │  Volumes: …            │
+//	│ Disk: …     │  Reclaimable: …        │
+//	╰──────────────────────────────────────╯
+//	╭──────────────────────────────────────╮
+//	│ containers table  OR  log viewer     │  ← main content
+//	╰──────────────────────────────────────╯
+//	  status / keybinding hint               ← 1 line
 type AppModel struct {
 	containers ContainersModel
 	logs       LogsModel
@@ -95,7 +103,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logs, cmd = m.logs.Update(msg)
 		cmds = append(cmds, cmd)
 
-	case SystemDFLoadedMsg:
+	case SystemDFLoadedMsg, MachineInfoLoadedMsg:
 		var cmd tea.Cmd
 		m.systemDF, cmd = m.systemDF.Update(msg)
 		cmds = append(cmds, cmd)
@@ -112,15 +120,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// headerH is the height consumed by the SystemDF header bar.
-const headerH = 1
+// headerH is the height consumed by the header: 1 title row + 1 divider + 4 data rows + 2 border rows.
+const headerH = 8
 
 func (m AppModel) View() string {
 	if m.width == 0 {
 		return "Initialising…"
 	}
 
-	header := m.systemDF.HeaderView(m.width)
+	innerW := m.width - 2 // border adds 1 char on each side
+	header := focusedBorder.Width(innerW).Render(m.systemDF.HeaderView(innerW))
 
 	var main string
 	if m.showLogs {

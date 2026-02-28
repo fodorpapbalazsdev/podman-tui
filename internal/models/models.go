@@ -47,6 +47,15 @@ type SystemDFInfo struct {
 	Timestamp        time.Time
 }
 
+// MachineInfo holds resource allocation for the active Podman machine.
+// Fields are zero-valued when no machine is configured (e.g. native Linux).
+type MachineInfo struct {
+	Name     string
+	CPUs     int
+	MemoryMB int64 // total memory allocated in MiB
+	DiskGB   int64 // total disk space allocated in GiB
+}
+
 // LogEntry is a single line from `podman logs`.
 type LogEntry struct {
 	Timestamp time.Time

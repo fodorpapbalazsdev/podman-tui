@@ -36,6 +36,8 @@ const (
 		`{"Type":"Containers","Total":2,"Size":"1.2MB","RawReclaimable":0},` +
 		`{"Type":"Volumes","Total":1,"Size":"100MB","RawReclaimable":52428800}` +
 		`]`
+
+	mockMachineInspectJSON = `[{"Name":"podman-machine-default","Resources":{"CPUs":4,"DiskSize":100,"Memory":2048}}]`
 )
 
 // TestMain intercepts test-binary invocations used as the fake podman binary.
@@ -77,6 +79,10 @@ func runMockPodman() {
 	case "system":
 		if len(os.Args) > 2 && os.Args[2] == "df" {
 			fmt.Println(mockSystemDFJSON)
+		}
+	case "machine":
+		if len(os.Args) > 2 && os.Args[2] == "inspect" {
+			fmt.Println(mockMachineInspectJSON)
 		}
 	case "start", "stop", "pause", "unpause", "rm":
 		// success – no output needed
@@ -204,6 +210,27 @@ func TestGetSystemDF_Failure(t *testing.T) {
 	t.Setenv("GO_PODMAN_MOCK_FAIL", "system")
 	_, err := svc.GetSystemDF()
 	require.Error(t, err)
+}
+
+// ---- GetMachineInfo ----
+
+func TestGetMachineInfo(t *testing.T) {
+	info, err := mockService(t).GetMachineInfo()
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	assert.Equal(t, "podman-machine-default", info.Name)
+	assert.Equal(t, 4, info.CPUs)
+	assert.Equal(t, int64(2048), info.MemoryMB)
+	assert.Equal(t, int64(100), info.DiskGB)
+}
+
+func TestGetMachineInfo_NoMachine(t *testing.T) {
+	// When machine inspect fails (e.g. native Linux), no error is returned.
+	svc := mockService(t)
+	t.Setenv("GO_PODMAN_MOCK_FAIL", "machine")
+	info, err := svc.GetMachineInfo()
+	require.NoError(t, err)
+	assert.Nil(t, info)
 }
 
 // ---- container lifecycle actions ----

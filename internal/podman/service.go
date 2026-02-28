@@ -283,6 +283,42 @@ func (s *Service) GetContainerLogs(id string, lines int) ([]models.LogEntry, err
 	return entries, nil
 }
 
+// ---- machine info ----
+
+type rawMachineResources struct {
+	CPUs     int   `json:"CPUs"`
+	DiskSize int64 `json:"DiskSize"` // GiB
+	Memory   int64 `json:"Memory"`   // MiB
+}
+
+type rawMachineInspect struct {
+	Name      string              `json:"Name"`
+	Resources rawMachineResources `json:"Resources"`
+}
+
+// GetMachineInfo returns resource allocation for the default Podman machine.
+// Returns nil, nil when no machine is configured (e.g. native Linux).
+func (s *Service) GetMachineInfo() (*models.MachineInfo, error) {
+	stdout, _, code := s.runCommand("machine", "inspect")
+	if code != 0 {
+		return nil, nil
+	}
+	var machines []rawMachineInspect
+	if err := json.Unmarshal([]byte(stdout), &machines); err != nil {
+		return nil, fmt.Errorf("parse machine inspect: %w", err)
+	}
+	if len(machines) == 0 {
+		return nil, nil
+	}
+	m := machines[0]
+	return &models.MachineInfo{
+		Name:     strings.TrimRight(m.Name, "*"),
+		CPUs:     m.Resources.CPUs,
+		MemoryMB: m.Resources.Memory,
+		DiskGB:   m.Resources.DiskSize,
+	}, nil
+}
+
 // ---- system df ----
 
 // rawDFEntry matches one element of the flat array podman system df --format json returns:

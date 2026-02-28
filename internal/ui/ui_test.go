@@ -12,6 +12,15 @@ import (
 	"github.com/fpbpi/podman-tui/internal/models"
 )
 
+// ---- formatMachineMem ----
+
+func TestFormatMachineMem(t *testing.T) {
+	assert.Equal(t, "512 MiB", formatMachineMem(512))
+	assert.Equal(t, "1.0 GiB", formatMachineMem(1024))
+	assert.Equal(t, "2.0 GiB", formatMachineMem(2048))
+	assert.Equal(t, "3.6 GiB", formatMachineMem(3712))
+}
+
 // ---- formatPorts ----
 
 func TestFormatPorts_Empty(t *testing.T) {

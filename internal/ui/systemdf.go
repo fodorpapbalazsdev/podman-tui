@@ -12,13 +12,14 @@ import (
 	"github.com/fpbpi/podman-tui/internal/podman"
 )
 
-// SystemDFModel fetches disk-usage data and renders it as a header bar.
+// SystemDFModel fetches disk-usage and machine info and renders them as a header bar.
 type SystemDFModel struct {
-	spinner spinner.Model
-	loading bool
-	err     error
-	info    *models.SystemDFInfo
-	service *podman.Service
+	spinner     spinner.Model
+	loading     bool
+	err         error
+	info        *models.SystemDFInfo
+	machineInfo *models.MachineInfo
+	service     *podman.Service
 }
 
 func newSystemDFModel(svc *podman.Service) SystemDFModel {
@@ -40,8 +41,15 @@ func (m SystemDFModel) fetchDF() tea.Cmd {
 	}
 }
 
+func (m SystemDFModel) fetchMachineInfo() tea.Cmd {
+	return func() tea.Msg {
+		info, err := m.service.GetMachineInfo()
+		return MachineInfoLoadedMsg{Info: info, Err: err}
+	}
+}
+
 func (m SystemDFModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchDF())
+	return tea.Batch(m.spinner.Tick, m.fetchDF(), m.fetchMachineInfo())
 }
 
 func (m SystemDFModel) Update(msg tea.Msg) (SystemDFModel, tea.Cmd) {
@@ -56,6 +64,8 @@ func (m SystemDFModel) Update(msg tea.Msg) (SystemDFModel, tea.Cmd) {
 		m.loading = false
 		m.err = msg.Err
 		m.info = msg.Info
+	case MachineInfoLoadedMsg:
+		m.machineInfo = msg.Info
 	}
 	return m, nil
 }
@@ -69,72 +79,98 @@ func (m *SystemDFModel) Refresh() tea.Cmd {
 // ---- styles ----
 
 var (
-	headerBg = lipgloss.Color("62")
-
-	headerBarStyle = lipgloss.NewStyle().
-			Background(headerBg).
-			Foreground(lipgloss.Color("15"))
-
-	headerAppStyle = lipgloss.NewStyle().
-			Background(headerBg).
-			Foreground(lipgloss.Color("15")).
-			Bold(true).
-			Padding(0, 1)
-
-	headerSepStyle = lipgloss.NewStyle().
-			Background(headerBg).
-			Foreground(lipgloss.Color("105"))
-
-	headerLabelStyle = lipgloss.NewStyle().
-				Background(headerBg).
-				Foreground(lipgloss.Color("189"))
-
-	headerValueStyle = lipgloss.NewStyle().
-				Background(headerBg).
-				Foreground(lipgloss.Color("15")).
-				Bold(true)
-
-	headerTimeStyle = lipgloss.NewStyle().
-			Background(headerBg).
-			Foreground(lipgloss.Color("189")).
-			Padding(0, 1)
+	headerBarStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	headerAppStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true).Padding(0, 1)
+	headerSepStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("62"))
+	headerLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("189"))
+	headerValueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+	headerTimeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("189")).Padding(0, 1)
 )
 
-// HeaderView renders the one-line header bar at the top of the screen.
+// formatMachineMem converts a MiB value to a human-readable string.
+func formatMachineMem(mb int64) string {
+	if mb >= 1024 {
+		return fmt.Sprintf("%.1f GiB", float64(mb)/1024.0)
+	}
+	return fmt.Sprintf("%d MiB", mb)
+}
+
+// HeaderView renders a multi-line header with two equal columns:
+//
+//	podman-tui                                               15:04:05
+//	 Machine: podman-machine-default │  Images: 4 (294.3MB)
+//	 CPU: 4                          │  Containers: 2 (1.2MB)
+//	 Mem: 2.0 GiB                    │  Volumes: 1 (100MB)
+//	 Disk: 100 GiB                   │  Reclaimable: 154.9 MB
 func (m SystemDFModel) HeaderView(width int) string {
-	sep := headerSepStyle.Render(" │ ")
+	stat := func(label, val string) string {
+		return headerLabelStyle.Render(label+": ") + headerValueStyle.Render(val)
+	}
+	indent := headerBarStyle.Render(" ")
 
-	left := headerAppStyle.Render("podman-tui") + sep
+	// ── title bar: app name left, timestamp right ──────────────────────────
+	title := headerAppStyle.Render("podman-tui")
+	timestamp := headerTimeStyle.Render(time.Now().Format("15:04:05"))
+	titlePad := width - lipgloss.Width(title) - lipgloss.Width(timestamp)
+	if titlePad < 0 {
+		titlePad = 0
+	}
+	titleRow := title + headerBarStyle.Render(strings.Repeat(" ", titlePad)) + timestamp
 
-	if m.loading {
-		left += headerBarStyle.Render(fmt.Sprintf("%s loading…", m.spinner.View()))
-	} else if m.err != nil {
-		left += headerBarStyle.Render("system df unavailable")
-	} else if m.info != nil {
-		stat := func(label, val string) string {
-			return headerLabelStyle.Render(label+": ") + headerValueStyle.Render(val)
+	// ── two-column body ────────────────────────────────────────────────────
+	colDiv := headerSepStyle.Render("│")
+	divW := lipgloss.Width(colDiv)
+	leftW := (width - divW) / 2
+	rightW := width - leftW - divW
+
+	// row pads both sides to their column width and joins them with the divider.
+	row := func(leftContent, rightContent string) string {
+		lPad := leftW - lipgloss.Width(leftContent)
+		if lPad < 0 {
+			lPad = 0
 		}
-		left += stat("Images", fmt.Sprintf("%d (%s)", m.info.ImagesCount, m.info.ImagesSize))
-		left += headerBarStyle.Render("  ")
-		left += stat("Containers", fmt.Sprintf("%d (%s)", m.info.ContainersCount, m.info.ContainersSize))
-		left += headerBarStyle.Render("  ")
-		left += stat("Volumes", fmt.Sprintf("%d (%s)", m.info.VolumesCount, m.info.VolumesSize))
-		left += sep
-		left += stat("Reclaimable", m.info.TotalReclaimable)
+		rPad := rightW - lipgloss.Width(rightContent)
+		if rPad < 0 {
+			rPad = 0
+		}
+		l := leftContent + headerBarStyle.Render(strings.Repeat(" ", lPad))
+		r := rightContent + headerBarStyle.Render(strings.Repeat(" ", rPad))
+		return l + colDiv + r
 	}
 
-	right := headerTimeStyle.Render(time.Now().Format("15:04:05"))
-
-	// Pad the middle to push the timestamp to the right edge.
-	leftLen := lipgloss.Width(left)
-	rightLen := lipgloss.Width(right)
-	pad := width - leftLen - rightLen
-	if pad < 0 {
-		pad = 0
+	// Left column: machine info (one item per line).
+	var left [4]string
+	if m.machineInfo != nil {
+		mi := m.machineInfo
+		left[0] = indent + stat("Machine", mi.Name)
+		left[1] = indent + stat("CPU", fmt.Sprintf("%d", mi.CPUs))
+		left[2] = indent + stat("Mem", formatMachineMem(mi.MemoryMB))
+		left[3] = indent + stat("Disk", fmt.Sprintf("%d GiB", mi.DiskGB))
 	}
-	middle := headerBarStyle.Render(strings.Repeat(" ", pad))
 
-	return left + middle + right
+	// Right column: system df (one item per line).
+	var right [4]string
+	if m.loading {
+		right[0] = indent + headerBarStyle.Render(fmt.Sprintf("%s loading…", m.spinner.View()))
+	} else if m.err != nil {
+		right[0] = indent + headerBarStyle.Render("system df unavailable")
+	} else if m.info != nil {
+		right[0] = indent + stat("Images", fmt.Sprintf("%d (%s)", m.info.ImagesCount, m.info.ImagesSize))
+		right[1] = indent + stat("Containers", fmt.Sprintf("%d (%s)", m.info.ContainersCount, m.info.ContainersSize))
+		right[2] = indent + stat("Volumes", fmt.Sprintf("%d (%s)", m.info.VolumesCount, m.info.VolumesSize))
+		right[3] = indent + stat("Reclaimable", m.info.TotalReclaimable)
+	}
+
+	divider := headerSepStyle.Render(strings.Repeat("─", width))
+
+	return strings.Join([]string{
+		titleRow,
+		divider,
+		row(left[0], right[0]),
+		row(left[1], right[1]),
+		row(left[2], right[2]),
+		row(left[3], right[3]),
+	}, "\n")
 }
 
 // renderDFInfo is kept for potential future use (e.g. a detail popup).

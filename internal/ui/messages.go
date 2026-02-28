@@ -34,6 +34,12 @@ type ShowLogsMsg struct {
 	Container models.Container
 }
 
+// MachineInfoLoadedMsg is sent when podman machine info has been fetched.
+type MachineInfoLoadedMsg struct {
+	Info *models.MachineInfo
+	Err  error
+}
+
 // BackToContainersMsg is sent from the logs window when the user presses Esc.
 type BackToContainersMsg struct{}
 

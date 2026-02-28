@@ -23,15 +23,17 @@ import (
 //	╰──────────────────────────────────────╯
 //	  status / keybinding hint               ← 1 line
 type AppModel struct {
-	containers   ContainersModel
-	logs         LogsModel
-	systemDF     SystemDFModel
-	showLogs     bool
-	pruneConfirm bool
-	pruneResult  string // non-empty while the prune notification is visible
-	width        int
-	height       int
-	service      *podman.Service
+	containers     ContainersModel
+	logs           LogsModel
+	systemDF       SystemDFModel
+	showLogs       bool
+	pruneConfirm   bool
+	pruneDone      bool   // true while the result dialog is visible
+	pruneReclaimed string // reclaimed space reported by podman (may be empty)
+	pruneErr       error  // non-nil if the prune failed
+	width          int
+	height         int
+	service        *podman.Service
 }
 
 // NewAppModel constructs the root model.
@@ -70,10 +72,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		m.pruneResult = "" // clear any prune notification on next keypress
+		// Any keypress dismisses the result dialog without further action.
+		if m.pruneDone {
+			m.pruneDone = false
+			m.pruneReclaimed = ""
+			m.pruneErr = nil
+			break
+		}
 
 		if m.pruneConfirm {
-			if msg.String() == "y" {
+			if msg.String() == "enter" {
 				cmds = append(cmds, m.pruneCmd())
 			}
 			m.pruneConfirm = false
@@ -122,18 +130,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 	case PruneDoneMsg:
-		if msg.Err != nil {
-			m.pruneResult = "Prune failed: " + msg.Err.Error()
-		} else if msg.Reclaimed != "" {
-			m.pruneResult = "Pruned. Total reclaimed space: " + msg.Reclaimed
-		} else {
-			m.pruneResult = "Pruned. Nothing to reclaim."
+		m.pruneDone = true
+		m.pruneReclaimed = msg.Reclaimed
+		m.pruneErr = msg.Err
+		if msg.Err == nil {
+			// Refresh container list and header stats after a successful prune.
+			var cmd tea.Cmd
+			m.containers, cmd = m.containers.Update(ContainerActionDoneMsg{})
+			cmds = append(cmds, cmd)
+			cmds = append(cmds, m.systemDF.Refresh())
 		}
-		// Trigger a full container refresh and refresh header stats.
-		var cmd tea.Cmd
-		m.containers, cmd = m.containers.Update(ContainerActionDoneMsg{Err: msg.Err})
-		cmds = append(cmds, cmd)
-		cmds = append(cmds, m.systemDF.Refresh())
 
 	default:
 		// Spinner ticks and other internal messages.
@@ -155,6 +161,18 @@ func (m AppModel) View() string {
 		return "Initialising…"
 	}
 
+	// Modal dialogs float over the dimmed background.
+	if m.pruneConfirm {
+		return placeOverlay(m.renderPruneConfirmDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
+	if m.pruneDone {
+		return placeOverlay(m.renderPruneResultDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
+
+	return m.normalView()
+}
+
+func (m AppModel) normalView() string {
 	innerW := m.width - 2 // border adds 1 char on each side
 	header := focusedBorder.Width(innerW).Render(m.systemDF.HeaderView(innerW))
 
@@ -172,6 +190,64 @@ func (m AppModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar)
 }
 
+const dialogContentW = 38
+
+func (m AppModel) renderPruneConfirmDialog() string {
+	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render("System Prune")
+
+	body := "Remove all unused resources:\n" +
+		"  · stopped containers\n" +
+		"  · dangling images\n" +
+		"  · unused networks\n" +
+		"  · build cache"
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		center.Render(title),
+		"",
+		body,
+		"",
+		center.Render(dim.Render("enter:confirm   esc:cancel")),
+	)
+	return dialogStyle.BorderForeground(lipgloss.Color("214")).Render(content)
+}
+
+func (m AppModel) renderPruneResultDialog() string {
+	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+
+	var title, body string
+	var borderColor lipgloss.Color
+
+	if m.pruneErr != nil {
+		borderColor = lipgloss.Color("196")
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")).Render("Prune Failed")
+		body = errorStyle.Render(m.pruneErr.Error())
+	} else {
+		borderColor = lipgloss.Color("82")
+		title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82")).Render("Prune Complete")
+		reclaimed := m.pruneReclaimed
+		if reclaimed == "" {
+			reclaimed = "nothing to reclaim"
+		}
+		body = lipgloss.JoinVertical(lipgloss.Left,
+			"Total reclaimed space:",
+			"",
+			center.Render(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82")).Render(reclaimed)),
+		)
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		center.Render(title),
+		"",
+		body,
+		"",
+		center.Render(dim.Render("press any key to close")),
+	)
+	return dialogStyle.BorderForeground(borderColor).Render(content)
+}
+
 // mainHeight is the inner content area height (excluding header + border overhead + status bar).
 func (m AppModel) mainHeight() int {
 	h := m.height - headerH - 1 // 1 for status bar
@@ -183,11 +259,7 @@ func (m AppModel) mainHeight() int {
 
 func (m *AppModel) renderStatusBar() string {
 	var hint string
-	if m.pruneResult != "" {
-		hint = m.pruneResult
-	} else if m.pruneConfirm {
-		hint = "Prune all unused resources (containers, images, networks)? y:confirm  any other key:cancel"
-	} else if m.showLogs {
+	if m.showLogs {
 		name := "none"
 		if m.logs.container != nil {
 			name = m.logs.container.Name

@@ -30,6 +30,11 @@ var (
 			Foreground(lipgloss.Color("196")).
 			Bold(true)
 
+	// dialogStyle is the base style for modal dialog boxes.
+	dialogStyle = lipgloss.NewStyle().
+			Padding(1, 3).
+			Border(lipgloss.RoundedBorder())
+
 	// runningStyle colours "running" status green.
 	runningStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
 	// exitedStyle colours "exited" status red.

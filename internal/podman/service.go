@@ -319,6 +319,23 @@ func (s *Service) GetMachineInfo() (*models.MachineInfo, error) {
 	}, nil
 }
 
+// SystemPrune removes all unused containers, images, networks, and build cache.
+// It returns the reclaimed-space summary line reported by podman (e.g. "293.8 MB").
+func (s *Service) SystemPrune() (string, error) {
+	stdout, stderr, code := s.runCommand("system", "prune", "-f")
+	if code != 0 {
+		return "", fmt.Errorf("podman system prune: %s", strings.TrimSpace(stderr))
+	}
+	reclaimed := ""
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "Total reclaimed space:") {
+			reclaimed = strings.TrimSpace(strings.TrimPrefix(line, "Total reclaimed space:"))
+			break
+		}
+	}
+	return reclaimed, nil
+}
+
 // ---- system df ----
 
 // rawDFEntry matches one element of the flat array podman system df --format json returns:

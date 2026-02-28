@@ -23,13 +23,15 @@ import (
 //	╰──────────────────────────────────────╯
 //	  status / keybinding hint               ← 1 line
 type AppModel struct {
-	containers ContainersModel
-	logs       LogsModel
-	systemDF   SystemDFModel
-	showLogs   bool
-	width      int
-	height     int
-	service    *podman.Service
+	containers   ContainersModel
+	logs         LogsModel
+	systemDF     SystemDFModel
+	showLogs     bool
+	pruneConfirm bool
+	pruneResult  string // non-empty while the prune notification is visible
+	width        int
+	height       int
+	service      *podman.Service
 }
 
 // NewAppModel constructs the root model.
@@ -68,16 +70,27 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-		if m.showLogs {
+		m.pruneResult = "" // clear any prune notification on next keypress
+
+		if m.pruneConfirm {
+			if msg.String() == "y" {
+				cmds = append(cmds, m.pruneCmd())
+			}
+			m.pruneConfirm = false
+		} else if m.showLogs {
 			// All other keys go to the logs window.
 			var cmd tea.Cmd
 			m.logs, cmd = m.logs.Update(msg)
 			cmds = append(cmds, cmd)
 		} else {
-			// Keys go to containers.
-			var cmd tea.Cmd
-			m.containers, cmd = m.containers.Update(msg)
-			cmds = append(cmds, cmd)
+			if msg.String() == "P" {
+				m.pruneConfirm = true
+			} else {
+				// Keys go to containers.
+				var cmd tea.Cmd
+				m.containers, cmd = m.containers.Update(msg)
+				cmds = append(cmds, cmd)
+			}
 		}
 
 	// ---- navigation between views ----
@@ -107,6 +120,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.systemDF, cmd = m.systemDF.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case PruneDoneMsg:
+		if msg.Err != nil {
+			m.pruneResult = "Prune failed: " + msg.Err.Error()
+		} else if msg.Reclaimed != "" {
+			m.pruneResult = "Pruned. Total reclaimed space: " + msg.Reclaimed
+		} else {
+			m.pruneResult = "Pruned. Nothing to reclaim."
+		}
+		// Trigger a full container refresh and refresh header stats.
+		var cmd tea.Cmd
+		m.containers, cmd = m.containers.Update(ContainerActionDoneMsg{Err: msg.Err})
+		cmds = append(cmds, cmd)
+		cmds = append(cmds, m.systemDF.Refresh())
 
 	default:
 		// Spinner ticks and other internal messages.
@@ -156,16 +183,27 @@ func (m AppModel) mainHeight() int {
 
 func (m *AppModel) renderStatusBar() string {
 	var hint string
-	if m.showLogs {
+	if m.pruneResult != "" {
+		hint = m.pruneResult
+	} else if m.pruneConfirm {
+		hint = "Prune all unused resources (containers, images, networks)? y:confirm  any other key:cancel"
+	} else if m.showLogs {
 		name := "none"
 		if m.logs.container != nil {
 			name = m.logs.container.Name
 		}
 		hint = "Logs: " + name + "  │  r:refresh  c:clear  ↑↓/PgUp/PgDn:scroll  esc:back  q:quit"
 	} else {
-		hint = "r:refresh  enter/l:logs  s:stop  t:start  p:pause  u:unpause  d:delete  q:quit"
+		hint = "r:refresh  enter/l:logs  s:stop  t:start  p:pause  u:unpause  d:delete  P:prune  q:quit"
 	}
 	return statusStyle.Width(m.width).Render(hint)
+}
+
+func (m AppModel) pruneCmd() tea.Cmd {
+	return func() tea.Msg {
+		reclaimed, err := m.service.SystemPrune()
+		return PruneDoneMsg{Reclaimed: reclaimed, Err: err}
+	}
 }
 
 func (m *AppModel) applyLayout() {

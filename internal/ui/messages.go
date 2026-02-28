@@ -43,5 +43,11 @@ type MachineInfoLoadedMsg struct {
 // BackToContainersMsg is sent from the logs window when the user presses Esc.
 type BackToContainersMsg struct{}
 
+// PruneDoneMsg is sent after a system prune completes.
+type PruneDoneMsg struct {
+	Reclaimed string // human-readable reclaimed space, e.g. "293.8 MB"
+	Err       error
+}
+
 // autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
 type autoRefreshMsg struct{}

@@ -152,7 +152,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			m.loading = true
 			cmds = append(cmds, m.spinner.Tick, m.fetchContainers())
 
-		case "l":
+		case "l", "enter":
 			if con := m.selectedContainer(); con != nil {
 				cmds = append(cmds, func() tea.Msg { return ShowLogsMsg{Container: *con} })
 			}
@@ -224,7 +224,7 @@ func (m ContainersModel) View() string {
 		body = colorizeTableStatuses(m.table.View())
 	}
 
-	help := statusStyle.Render("r:refresh  s:start  t:stop  p:pause  u:unpause  d:delete  l:logs  (auto-refresh 3s)")
+	help := statusStyle.Render("r:refresh  enter/l:logs  s:start  t:stop  p:pause  u:unpause  d:delete  (auto-refresh 1s)")
 	return lipgloss.JoinVertical(lipgloss.Left, title, body, help)
 }
 

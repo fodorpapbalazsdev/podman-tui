@@ -163,7 +163,7 @@ func (m *AppModel) renderStatusBar() string {
 		}
 		hint = "Logs: " + name + "  │  r:refresh  c:clear  ↑↓/PgUp/PgDn:scroll  esc:back  q:quit"
 	} else {
-		hint = "r:refresh  l:logs  s:stop  t:start  p:pause  u:unpause  d:delete  q:quit"
+		hint = "r:refresh  enter/l:logs  s:stop  t:start  p:pause  u:unpause  d:delete  q:quit"
 	}
 	return statusStyle.Width(m.width).Render(hint)
 }

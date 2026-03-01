@@ -247,6 +247,15 @@ func (s *Service) RemoveContainer(id string, force bool) error {
 	return nil
 }
 
+// GetContainerInspectJSON returns the raw JSON output of `podman container inspect`.
+func (s *Service) GetContainerInspectJSON(id string) (string, error) {
+	stdout, stderr, code := s.runCommand("container", "inspect", id)
+	if code != 0 {
+		return "", fmt.Errorf("podman container inspect: %s", strings.TrimSpace(stderr))
+	}
+	return stdout, nil
+}
+
 // GetContainerLogs retrieves the last `lines` log lines for a container.
 func (s *Service) GetContainerLogs(id string, lines int) ([]models.LogEntry, error) {
 	stdout, stderr, code := s.runCommand(

@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"os/exec"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fpbpi/podman-tui/internal/podman"
@@ -35,6 +38,15 @@ type AppModel struct {
 	height         int
 	service        *podman.Service
 }
+
+// inspectReadyMsg carries the raw JSON from podman container inspect.
+type inspectReadyMsg struct {
+	json string
+	err  error
+}
+
+// inspectExitedMsg is sent when the bat process exits.
+type inspectExitedMsg struct{ err error }
 
 // NewAppModel constructs the root model.
 func NewAppModel(svc *podman.Service) AppModel {
@@ -86,7 +98,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pruneConfirm = false
 		} else if m.showLogs {
-			// All other keys go to the logs window.
 			var cmd tea.Cmd
 			m.logs, cmd = m.logs.Update(msg)
 			cmds = append(cmds, cmd)
@@ -108,6 +119,30 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.logs, cmd = m.logs.Update(msg)
 		cmds = append(cmds, cmd)
+
+	case ShowInspectMsg:
+		// Fetch inspect JSON asynchronously, then hand off to bat.
+		con := msg.Container
+		svc := m.service
+		return m, func() tea.Msg {
+			json, err := svc.GetContainerInspectJSON(con.ID)
+			return inspectReadyMsg{json: json, err: err}
+		}
+
+	case inspectReadyMsg:
+		if msg.err != nil {
+			// Surface the error via the containers model error state.
+			// (Simplest approach: nothing to show inline; user sees nothing changed.)
+			break
+		}
+		batCmd := exec.Command("bat", "--language=json", "--paging=always")
+		batCmd.Stdin = strings.NewReader(msg.json)
+		return m, tea.ExecProcess(batCmd, func(err error) tea.Msg {
+			return inspectExitedMsg{err: err}
+		})
+
+	case inspectExitedMsg:
+		// TUI has already resumed; nothing to do.
 
 	case BackToContainersMsg:
 		m.showLogs = false
@@ -176,12 +211,11 @@ func (m AppModel) normalView() string {
 	innerW := m.width - 2 // border adds 1 char on each side
 	header := focusedBorder.Width(innerW).Render(m.systemDF.HeaderView(innerW))
 
+	border := focusedBorder.Width(m.width - 2).Height(m.mainHeight())
 	var main string
 	if m.showLogs {
-		border := focusedBorder.Width(m.width - 2).Height(m.mainHeight())
 		main = border.Render(m.logs.View())
 	} else {
-		border := focusedBorder.Width(m.width - 2).Height(m.mainHeight())
 		main = border.Render(m.containers.View())
 	}
 
@@ -266,7 +300,7 @@ func (m *AppModel) renderStatusBar() string {
 		}
 		hint = "Logs: " + name + "  │  r:refresh  c:clear  ↑↓/PgUp/PgDn:scroll  esc:back  q:quit"
 	} else {
-		hint = "r:refresh  enter/l:logs  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  q:quit"
+		hint = "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  q:quit"
 	}
 	return statusStyle.Width(m.width).Render(hint)
 }

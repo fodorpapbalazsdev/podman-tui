@@ -49,5 +49,10 @@ type PruneDoneMsg struct {
 	Err       error
 }
 
+// ShowInspectMsg requests bat to open the inspect JSON for a container.
+type ShowInspectMsg struct {
+	Container models.Container
+}
+
 // autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
 type autoRefreshMsg struct{}

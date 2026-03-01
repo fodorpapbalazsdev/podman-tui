@@ -163,6 +163,11 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				cmds = append(cmds, func() tea.Msg { return ShowLogsMsg{Container: *con} })
 			}
 
+		case "i":
+			if con := m.selectedContainer(); con != nil {
+				cmds = append(cmds, func() tea.Msg { return ShowInspectMsg{Container: *con} })
+			}
+
 		case "s":
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID

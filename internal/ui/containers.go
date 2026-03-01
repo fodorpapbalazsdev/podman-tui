@@ -13,26 +13,31 @@ import (
 	"github.com/fpbpi/podman-tui/internal/podman"
 )
 
-const autoRefreshInterval = 1 * time.Second
+const (
+	autoRefreshInterval      = 1 * time.Second
+	statusColWidth           = 10
+	pendingStatusPlaceholder = "pending   " // exactly statusColWidth visible chars; not a real status
+)
 
 // ContainersModel is the Bubble Tea model for the containers pane.
 type ContainersModel struct {
-	table      table.Model
-	spinner    spinner.Model
-	loading    bool
-	fetching   bool // true while any fetchContainers goroutine is in flight
-	focused    bool
-	err        error
-	service    *podman.Service
-	containers []models.Container
-	width      int
-	height     int
+	table           table.Model
+	spinner         spinner.Model
+	loading         bool
+	fetching        bool   // true while any fetchContainers goroutine is in flight
+	actionPendingID string // non-empty while a start/stop/pause/… action is in flight
+	focused         bool
+	err             error
+	service         *podman.Service
+	containers      []models.Container
+	width           int
+	height          int
 }
 
 func newContainersModel(svc *podman.Service) ContainersModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("62"))
+	sp.Style = lipgloss.NewStyle() // coloring is applied by injectActionSpinner at render time
 
 	cols := []table.Column{
 		{Title: "Name", Width: 20},
@@ -100,7 +105,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.actionPendingID != "" {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -138,6 +143,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		cmds = append(cmds, tickRefresh())
 
 	case ContainerActionDoneMsg:
+		m.actionPendingID = ""
 		m.err = msg.Err
 		m.loading = true
 		m.fetching = true
@@ -160,7 +166,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		case "s":
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
-				cmds = append(cmds, func() tea.Msg {
+				m.actionPendingID = id
+				m.rebuildRows(m.containers)
+				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
 					return ContainerActionDoneMsg{Err: m.service.StartContainer(id)}
 				})
 			}
@@ -168,7 +176,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		case "t":
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
-				cmds = append(cmds, func() tea.Msg {
+				m.actionPendingID = id
+				m.rebuildRows(m.containers)
+				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
 					return ContainerActionDoneMsg{Err: m.service.StopContainer(id)}
 				})
 			}
@@ -176,7 +186,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		case "p":
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
-				cmds = append(cmds, func() tea.Msg {
+				m.actionPendingID = id
+				m.rebuildRows(m.containers)
+				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
 					return ContainerActionDoneMsg{Err: m.service.PauseContainer(id)}
 				})
 			}
@@ -184,7 +196,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		case "u":
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
-				cmds = append(cmds, func() tea.Msg {
+				m.actionPendingID = id
+				m.rebuildRows(m.containers)
+				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
 					return ContainerActionDoneMsg{Err: m.service.UnpauseContainer(id)}
 				})
 			}
@@ -192,7 +206,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		case "d":
 			if con := m.selectedContainer(); con != nil {
 				id := con.ID
-				cmds = append(cmds, func() tea.Msg {
+				m.actionPendingID = id
+				m.rebuildRows(m.containers)
+				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
 					return ContainerActionDoneMsg{Err: m.service.RemoveContainer(id, false)}
 				})
 			}
@@ -221,7 +237,7 @@ func (m ContainersModel) View() string {
 	} else if m.err != nil {
 		body = errorStyle.Render("Error: " + m.err.Error())
 	} else {
-		body = colorizeTableStatuses(m.table.View())
+		body = m.injectActionSpinner(colorizeTableStatuses(m.table.View()))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, body)
@@ -283,6 +299,48 @@ func (m *ContainersModel) selectedContainer() *models.Container {
 	return nil
 }
 
+// rebuildRows updates the table, substituting pendingStatusPlaceholder in the
+// status cell of the container that matches actionPendingID (if any).
+func (m *ContainersModel) rebuildRows(containers []models.Container) {
+	rows := containersToRows(containers)
+	if m.actionPendingID != "" {
+		for i, c := range containers {
+			if c.ID == m.actionPendingID {
+				rows[i][3] = pendingStatusPlaceholder
+				break
+			}
+		}
+	}
+	m.table.SetRows(rows)
+}
+
+// injectActionSpinner replaces the pendingStatusPlaceholder in the already-rendered
+// table string with the current spinner frame. Same post-processing approach as
+// colorizeTableStatuses to avoid ANSI-in-cell runewidth truncation.
+// When the pending container is the selected row, no foreground color is applied so
+// the selected-row highlight (white on blue) shows through cleanly.
+func (m ContainersModel) injectActionSpinner(s string) string {
+	if m.actionPendingID == "" {
+		return s
+	}
+	sv := m.spinner.View()
+	pad := strings.Repeat(" ", statusColWidth-lipgloss.Width(sv))
+
+	// Check whether the pending container is currently the highlighted row.
+	selectedIsPending := false
+	if row := m.table.SelectedRow(); row != nil {
+		selectedIsPending = strings.HasPrefix(m.actionPendingID, row[1])
+	}
+
+	var replacement string
+	if selectedIsPending {
+		replacement = sv + pad
+	} else {
+		replacement = "\x1b[38;5;214m" + sv + "\x1b[39m" + pad
+	}
+	return strings.Replace(s, pendingStatusPlaceholder, replacement, 1)
+}
+
 func containersToRows(containers []models.Container) []table.Row {
 	rows := make([]table.Row, 0, len(containers))
 	for _, c := range containers {
@@ -313,7 +371,6 @@ func containersToRows(containers []models.Container) []table.Row {
 // rendered output avoids that. \x1b[39m resets only the foreground so that the
 // selected-row background highlight is not wiped out.
 func colorizeTableStatuses(s string) string {
-	const statusColWidth = 10
 	for _, entry := range []struct {
 		status models.ContainerStatus
 		code   string

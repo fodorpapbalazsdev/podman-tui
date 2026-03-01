@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fpbpi/podman-tui/internal/models"
 	"github.com/fpbpi/podman-tui/internal/podman"
 )
 
@@ -32,7 +33,8 @@ type AppModel struct {
 	pruneDone      bool   // true while the result dialog is visible
 	pruneReclaimed string // reclaimed space reported by podman (may be empty)
 	pruneErr       error  // non-nil if the prune failed
-	loadingMsg     string // non-empty while logs/inspect is being fetched
+	loadingMsg           string             // non-empty while logs/inspect is being fetched
+	deleteConfirmContainer *models.Container // non-nil while delete confirm dialog is shown
 	width          int
 	height         int
 	service        *podman.Service
@@ -100,7 +102,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
-		if m.pruneConfirm {
+		if m.deleteConfirmContainer != nil {
+			if msg.String() == "enter" {
+				cmds = append(cmds, m.containers.confirmDelete(m.deleteConfirmContainer.ID))
+			}
+			m.deleteConfirmContainer = nil
+		} else if m.pruneConfirm {
 			if msg.String() == "enter" {
 				cmds = append(cmds, m.pruneCmd())
 			}
@@ -166,6 +173,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case inspectExitedMsg:
 		// TUI resumes automatically; nothing to do.
 
+	case ShowDeleteConfirmMsg:
+		con := msg.Container
+		m.deleteConfirmContainer = &con
+
 	// ---- data messages ----
 	case ContainersLoadedMsg, ContainerActionDoneMsg:
 		var cmd tea.Cmd
@@ -209,6 +220,9 @@ func (m AppModel) View() string {
 	}
 
 	// Modal dialogs float over the dimmed background.
+	if m.deleteConfirmContainer != nil {
+		return placeOverlay(m.renderDeleteConfirmDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
 	if m.loadingMsg != "" {
 		return placeOverlay(m.renderLoadingDialog(), dimBackground(m.normalView()), m.width, m.height)
 	}
@@ -230,6 +244,23 @@ func (m AppModel) normalView() string {
 }
 
 const dialogContentW = 38
+
+func (m AppModel) renderDeleteConfirmDialog() string {
+	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")).Render("Delete Container")
+	name := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Render(m.deleteConfirmContainer.Name)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		center.Render(title),
+		"",
+		"Remove "+name+"?",
+		dim.Render("This cannot be undone."),
+		"",
+		center.Render(dim.Render("enter:confirm   esc:cancel")),
+	)
+	return dialogStyle.BorderForeground(lipgloss.Color("196")).Render(content)
+}
 
 func (m AppModel) renderLoadingDialog() string {
 	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)

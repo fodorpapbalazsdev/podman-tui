@@ -211,12 +211,8 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 
 		case "d":
 			if con := m.selectedContainer(); con != nil {
-				id := con.ID
-				m.actionPendingID = id
-				m.rebuildRows(m.containers)
-				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.RemoveContainer(id, false)}
-				})
+				c := *con
+				cmds = append(cmds, func() tea.Msg { return ShowDeleteConfirmMsg{Container: c} })
 			}
 
 		default:
@@ -302,6 +298,16 @@ func (m *ContainersModel) selectedContainer() *models.Container {
 		}
 	}
 	return nil
+}
+
+// confirmDelete sets the pending spinner state and returns the delete command.
+// Called by AppModel after the user confirms the deletion dialog.
+func (m *ContainersModel) confirmDelete(id string) tea.Cmd {
+	m.actionPendingID = id
+	m.rebuildRows(m.containers)
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		return ContainerActionDoneMsg{Err: m.service.RemoveContainer(id, false)}
+	})
 }
 
 // rebuildRows rebuilds the table with compose grouping and the action spinner placeholder.

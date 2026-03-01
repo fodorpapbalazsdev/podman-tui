@@ -51,5 +51,11 @@ type ShowInspectMsg struct {
 	Container models.Container
 }
 
+// ShowDeleteConfirmMsg is sent when the user presses d on a container,
+// asking the app layer to show a confirmation dialog before deleting.
+type ShowDeleteConfirmMsg struct {
+	Container models.Container
+}
+
 // autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
 type autoRefreshMsg struct{}

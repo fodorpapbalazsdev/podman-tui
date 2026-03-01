@@ -128,6 +128,57 @@ func TestContainersToRows_Empty(t *testing.T) {
 	assert.Empty(t, containersToRows(nil))
 }
 
+// ---- buildGroupedRows ----
+
+func TestBuildGroupedRows_ComposeGroupsFirst(t *testing.T) {
+	containers := []models.Container{
+		{ID: "aaa", Name: "standalone", Status: models.StatusRunning},
+		{ID: "bbb", Name: "web", Status: models.StatusRunning, ComposeProject: "myapp"},
+		{ID: "ccc", Name: "db", Status: models.StatusRunning, ComposeProject: "myapp"},
+	}
+	rows := buildGroupedRows(containers, "")
+
+	// row 0: group header for "myapp"
+	require.Greater(t, len(rows), 0)
+	assert.Equal(t, "◆ myapp", rows[0][0])
+	assert.Equal(t, "", rows[0][1], "group header should have empty ID")
+
+	// rows 1 & 2: compose containers (sorted by name: db, web) — indented
+	assert.Equal(t, "  db", rows[1][0])
+	assert.Equal(t, "  web", rows[2][0])
+
+	// row 3: separator between group and standalone
+	assert.Equal(t, "", rows[3][1], "separator row should have empty ID")
+
+	// row 4: standalone container (no indentation)
+	require.Greater(t, len(rows), 4)
+	assert.Equal(t, "standalone", rows[4][0])
+}
+
+func TestBuildGroupedRows_PendingStatusPlaceholder(t *testing.T) {
+	containers := []models.Container{
+		{ID: "abc123def456", Name: "web", Status: models.StatusRunning, ComposeProject: "myapp"},
+	}
+	rows := buildGroupedRows(containers, "abc123def456")
+
+	// row 0 is header, row 1 is the container
+	require.Len(t, rows, 2)
+	assert.Equal(t, pendingStatusPlaceholder, rows[1][3], "pending container should have placeholder status")
+}
+
+func TestBuildGroupedRows_NoCompose(t *testing.T) {
+	containers := []models.Container{
+		{ID: "bbb", Name: "beta", Status: models.StatusRunning},
+		{ID: "aaa", Name: "alpha", Status: models.StatusRunning},
+	}
+	rows := buildGroupedRows(containers, "")
+
+	// No group headers; sorted by name.
+	require.Len(t, rows, 2)
+	assert.Equal(t, "alpha", rows[0][0])
+	assert.Equal(t, "beta", rows[1][0])
+}
+
 // ---- ContainersModel update logic ----
 
 func TestContainersModel_ContainersLoadedMsg(t *testing.T) {

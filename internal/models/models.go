@@ -24,15 +24,16 @@ type PortMapping struct {
 
 // Container represents a single Podman container with its runtime stats.
 type Container struct {
-	ID          string
-	Name        string
-	Status      ContainerStatus
-	Image       string
-	Created     time.Time
-	Started     time.Time
-	Ports       []PortMapping
-	MemoryUsage string
-	CPUUsage    string
+	ID             string
+	Name           string
+	Status         ContainerStatus
+	Image          string
+	Created        time.Time
+	Started        time.Time
+	Ports          []PortMapping
+	MemoryUsage    string
+	CPUUsage       string
+	ComposeProject string // empty for standalone containers
 }
 
 // SystemDFInfo holds disk-usage summary from `podman system df`.

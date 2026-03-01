@@ -52,18 +52,30 @@ func (s *Service) runCommand(args ...string) (string, string, int) {
 // ---- raw JSON shapes returned by podman CLI ----
 
 type rawContainer struct {
-	ID      string   `json:"Id"`
-	Names   []string `json:"Names"`
-	Image   string   `json:"Image"`
-	State   string   `json:"State"`
-	Created int64    `json:"Created"`
-	StartedAt int64  `json:"StartedAt"`
-	Ports   []struct {
+	ID        string            `json:"Id"`
+	Names     []string          `json:"Names"`
+	Image     string            `json:"Image"`
+	State     string            `json:"State"`
+	Created   int64             `json:"Created"`
+	StartedAt int64             `json:"StartedAt"`
+	Labels    map[string]string `json:"Labels"`
+	Ports     []struct {
 		HostIP        string `json:"host_ip"`
 		HostPort      uint16 `json:"host_port"`
 		ContainerPort uint16 `json:"container_port"`
 		Protocol      string `json:"protocol"`
 	} `json:"Ports"`
+}
+
+// composeProject extracts the compose project name from container labels,
+// checking both the Docker Compose and Podman Compose label keys.
+func composeProject(labels map[string]string) string {
+	for _, key := range []string{"com.docker.compose.project", "io.podman.compose.project"} {
+		if v, ok := labels[key]; ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 type statsEntry struct {
@@ -182,15 +194,16 @@ func (s *Service) GetContainers(all, withStats bool) ([]models.Container, error)
 		}
 
 		containers = append(containers, models.Container{
-			ID:          rc.ID,
-			Name:        name,
-			Image:       rc.Image,
-			Status:      status,
-			Created:     time.Unix(rc.Created, 0),
-			Started:     time.Unix(rc.StartedAt, 0),
-			Ports:       ports,
-			MemoryUsage: mem,
-			CPUUsage:    cpu,
+			ID:             rc.ID,
+			Name:           name,
+			Image:          rc.Image,
+			Status:         status,
+			Created:        time.Unix(rc.Created, 0),
+			Started:        time.Unix(rc.StartedAt, 0),
+			Ports:          ports,
+			MemoryUsage:    mem,
+			CPUUsage:       cpu,
+			ComposeProject: composeProject(rc.Labels),
 		})
 	}
 

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,7 +133,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				}
 			}
 			m.containers = containers
-			m.table.SetRows(containersToRows(containers))
+			m.rebuildRows(containers)
 		}
 
 	case autoRefreshMsg:
@@ -242,7 +243,7 @@ func (m ContainersModel) View() string {
 	} else if m.err != nil {
 		body = errorStyle.Render("Error: " + m.err.Error())
 	} else {
-		body = m.injectActionSpinner(colorizeTableStatuses(m.table.View()))
+		body = colorizeGroupHeaders(m.injectActionSpinner(colorizeTableStatuses(m.table.View())))
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, body)
@@ -291,10 +292,9 @@ func (m *ContainersModel) SetSize(w, h int) {
 
 func (m *ContainersModel) selectedContainer() *models.Container {
 	row := m.table.SelectedRow()
-	if row == nil {
+	if row == nil || row[1] == "" { // empty ID means a group header row
 		return nil
 	}
-	// match by truncated ID
 	shortID := row[1]
 	for i, c := range m.containers {
 		if strings.HasPrefix(c.ID, shortID) {
@@ -304,19 +304,91 @@ func (m *ContainersModel) selectedContainer() *models.Container {
 	return nil
 }
 
-// rebuildRows updates the table, substituting pendingStatusPlaceholder in the
-// status cell of the container that matches actionPendingID (if any).
+// rebuildRows rebuilds the table with compose grouping and the action spinner placeholder.
 func (m *ContainersModel) rebuildRows(containers []models.Container) {
-	rows := containersToRows(containers)
-	if m.actionPendingID != "" {
-		for i, c := range containers {
-			if c.ID == m.actionPendingID {
-				rows[i][3] = pendingStatusPlaceholder
-				break
-			}
+	m.table.SetRows(buildGroupedRows(containers, m.actionPendingID))
+}
+
+// buildGroupedRows returns table rows sorted and grouped by compose project.
+// Compose groups appear first (alphabetically), each preceded by a header row;
+// standalone containers follow. Within each group containers are sorted by name.
+// If pendingID is non-empty, that container's status cell gets the spinner placeholder.
+func buildGroupedRows(containers []models.Container, pendingID string) []table.Row {
+	type group struct {
+		project    string
+		containers []models.Container
+	}
+
+	var groups []group
+	seen := make(map[string]int)
+	var standalone []models.Container
+
+	for _, c := range containers {
+		if c.ComposeProject == "" {
+			standalone = append(standalone, c)
+			continue
+		}
+		if idx, ok := seen[c.ComposeProject]; ok {
+			groups[idx].containers = append(groups[idx].containers, c)
+		} else {
+			seen[c.ComposeProject] = len(groups)
+			groups = append(groups, group{project: c.ComposeProject, containers: []models.Container{c}})
 		}
 	}
-	m.table.SetRows(rows)
+
+	sort.Slice(groups, func(i, j int) bool { return groups[i].project < groups[j].project })
+	for i := range groups {
+		sort.Slice(groups[i].containers, func(a, b int) bool {
+			return groups[i].containers[a].Name < groups[i].containers[b].Name
+		})
+	}
+	sort.Slice(standalone, func(i, j int) bool { return standalone[i].Name < standalone[j].Name })
+
+	sep := table.Row{"", "", "", "", "", "", ""}
+
+	var rows []table.Row
+	for i, g := range groups {
+		if i > 0 {
+			rows = append(rows, sep)
+		}
+		// Group header row: name column holds the project label; ID column is empty
+		// so selectedContainer() skips it (empty ID never matches a real container).
+		rows = append(rows, table.Row{"◆ " + g.project, "", "", "", "", "", ""})
+		for _, c := range g.containers {
+			rows = append(rows, containerRow(c, pendingID, true))
+		}
+	}
+	if len(groups) > 0 && len(standalone) > 0 {
+		rows = append(rows, sep)
+	}
+	for _, c := range standalone {
+		rows = append(rows, containerRow(c, pendingID, false))
+	}
+	return rows
+}
+
+func containerRow(c models.Container, pendingID string, inGroup bool) table.Row {
+	shortID := c.ID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	status := string(c.Status)
+	if pendingID != "" && c.ID == pendingID {
+		status = pendingStatusPlaceholder
+	}
+	name := c.Name
+	if inGroup {
+		name = "  " + name
+	}
+	return table.Row{
+		name,
+		shortID,
+		truncate(c.Image, 30),
+		status,
+		formatPorts(c.Ports),
+		c.MemoryUsage,
+		c.CPUUsage,
+	}
 }
 
 // injectActionSpinner replaces the pendingStatusPlaceholder in the already-rendered
@@ -332,8 +404,9 @@ func (m ContainersModel) injectActionSpinner(s string) string {
 	pad := strings.Repeat(" ", statusColWidth-lipgloss.Width(sv))
 
 	// Check whether the pending container is currently the highlighted row.
+	// Group header rows have an empty ID column — skip those.
 	selectedIsPending := false
-	if row := m.table.SelectedRow(); row != nil {
+	if row := m.table.SelectedRow(); row != nil && row[1] != "" {
 		selectedIsPending = strings.HasPrefix(m.actionPendingID, row[1])
 	}
 
@@ -375,6 +448,32 @@ func containersToRows(containers []models.Container) []table.Row {
 // ANSI codes in cell values causes premature truncation. Post-processing the
 // rendered output avoids that. \x1b[39m resets only the foreground so that the
 // selected-row background highlight is not wiped out.
+// colorizeGroupHeaders applies bold + accent color to group header rows.
+// Header rows are identified by the ◆ prefix in the Name column.
+func colorizeGroupHeaders(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "◆ ") {
+			lines[i] = "\x1b[1m\x1b[38;5;62m" + line + "\x1b[22m\x1b[39m"
+		} else if len(line) > 0 && strings.TrimSpace(line) == "" {
+			// All-whitespace line: only render as a dim horizontal rule when
+			// there is actual content below (i.e. this is an intentional
+			// separator row, not a table height-padding row at the bottom).
+			hasContentBelow := false
+			for j := i + 1; j < len(lines); j++ {
+				if strings.TrimSpace(lines[j]) != "" {
+					hasContentBelow = true
+					break
+				}
+			}
+			if hasContentBelow {
+				lines[i] = "\x1b[2m\x1b[38;5;240m" + strings.Repeat("─", len(line)) + "\x1b[0m"
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func colorizeTableStatuses(s string) string {
 	for _, entry := range []struct {
 		status models.ContainerStatus

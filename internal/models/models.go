@@ -57,6 +57,14 @@ type MachineInfo struct {
 	DiskGB   int64 // total disk space allocated in GiB
 }
 
+// SystemInfo holds live host resource usage from `podman system info`.
+type SystemInfo struct {
+	MemTotalBytes  int64
+	MemFreeBytes   int64
+	DiskTotalBytes int64 // graphRoot filesystem total
+	DiskUsedBytes  int64 // graphRoot filesystem used
+}
+
 // LogEntry is a single line from `podman logs`.
 type LogEntry struct {
 	Timestamp time.Time

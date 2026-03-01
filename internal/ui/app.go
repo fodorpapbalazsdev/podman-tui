@@ -167,7 +167,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.containers, cmd = m.containers.Update(msg)
 		cmds = append(cmds, cmd)
 
-	case SystemDFLoadedMsg, MachineInfoLoadedMsg:
+	case SystemDFLoadedMsg, MachineInfoLoadedMsg, SystemInfoLoadedMsg:
 		var cmd tea.Cmd
 		m.systemDF, cmd = m.systemDF.Update(msg)
 		cmds = append(cmds, cmd)

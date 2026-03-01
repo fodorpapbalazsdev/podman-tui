@@ -316,6 +316,34 @@ func (s *Service) GetContainerLogs(id string, lines int) ([]models.LogEntry, err
 	return entries, nil
 }
 
+// GetSystemInfo returns live memory and disk usage from `podman system info`.
+// Returns nil, nil when the command fails or fields are unavailable.
+func (s *Service) GetSystemInfo() (*models.SystemInfo, error) {
+	stdout, _, code := s.runCommand("system", "info", "--format", "json")
+	if code != 0 {
+		return nil, nil
+	}
+	var raw struct {
+		Host struct {
+			MemFree  int64 `json:"memFree"`
+			MemTotal int64 `json:"memTotal"`
+		} `json:"host"`
+		Store struct {
+			GraphRootAllocated int64 `json:"graphRootAllocated"`
+			GraphRootUsed      int64 `json:"graphRootUsed"`
+		} `json:"store"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		return nil, nil
+	}
+	return &models.SystemInfo{
+		MemTotalBytes:  raw.Host.MemTotal,
+		MemFreeBytes:   raw.Host.MemFree,
+		DiskTotalBytes: raw.Store.GraphRootAllocated,
+		DiskUsedBytes:  raw.Store.GraphRootUsed,
+	}, nil
+}
+
 // ---- machine info ----
 
 type rawMachineResources struct {

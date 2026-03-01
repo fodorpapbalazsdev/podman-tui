@@ -19,6 +19,7 @@ type SystemDFModel struct {
 	err         error
 	info        *models.SystemDFInfo
 	machineInfo *models.MachineInfo
+	systemInfo  *models.SystemInfo
 	service     *podman.Service
 }
 
@@ -48,8 +49,15 @@ func (m SystemDFModel) fetchMachineInfo() tea.Cmd {
 	}
 }
 
+func (m SystemDFModel) fetchSystemInfo() tea.Cmd {
+	return func() tea.Msg {
+		info, err := m.service.GetSystemInfo()
+		return SystemInfoLoadedMsg{Info: info, Err: err}
+	}
+}
+
 func (m SystemDFModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchDF(), m.fetchMachineInfo())
+	return tea.Batch(m.spinner.Tick, m.fetchDF(), m.fetchMachineInfo(), m.fetchSystemInfo())
 }
 
 func (m SystemDFModel) Update(msg tea.Msg) (SystemDFModel, tea.Cmd) {
@@ -66,6 +74,8 @@ func (m SystemDFModel) Update(msg tea.Msg) (SystemDFModel, tea.Cmd) {
 		m.info = msg.Info
 	case MachineInfoLoadedMsg:
 		m.machineInfo = msg.Info
+	case SystemInfoLoadedMsg:
+		m.systemInfo = msg.Info
 	}
 	return m, nil
 }
@@ -93,6 +103,52 @@ func formatMachineMem(mb int64) string {
 		return fmt.Sprintf("%.1f GiB", float64(mb)/1024.0)
 	}
 	return fmt.Sprintf("%d MiB", mb)
+}
+
+// formatBytesGiB formats a byte count as GiB (≥1 GiB) or MiB.
+func formatBytesGiB(b int64) string {
+	const gib = 1024 * 1024 * 1024
+	const mib = 1024 * 1024
+	if b >= gib {
+		return fmt.Sprintf("%.1f GiB", float64(b)/gib)
+	}
+	return fmt.Sprintf("%.0f MiB", float64(b)/mib)
+}
+
+var (
+	headerUsageStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	barFilledLow      = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))  // green  <60%
+	barFilledMid      = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber  60-80%
+	barFilledHigh     = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red    >80%
+	barEmpty          = lipgloss.NewStyle().Foreground(lipgloss.Color("237"))
+)
+
+// renderUsageBar returns a compact visual bar followed by the used amount and percentage.
+// Example: "████████░░░░ 5.4 GiB · 50%"
+func renderUsageBar(usedBytes, totalBytes int64, barWidth int) string {
+	pct := 0.0
+	if totalBytes > 0 {
+		pct = float64(usedBytes) / float64(totalBytes)
+	}
+	filled := int(pct * float64(barWidth))
+	if filled > barWidth {
+		filled = barWidth
+	}
+
+	var filledStyle lipgloss.Style
+	switch {
+	case pct >= 0.8:
+		filledStyle = barFilledHigh
+	case pct >= 0.6:
+		filledStyle = barFilledMid
+	default:
+		filledStyle = barFilledLow
+	}
+
+	bar := filledStyle.Render(strings.Repeat("█", filled)) +
+		barEmpty.Render(strings.Repeat("░", barWidth-filled))
+	info := headerUsageStyle.Render(fmt.Sprintf("%s · %d%%", formatBytesGiB(usedBytes), int(pct*100)))
+	return bar + " " + info
 }
 
 // HeaderView renders a multi-line header with two equal columns:
@@ -144,8 +200,19 @@ func (m SystemDFModel) HeaderView(width int) string {
 		mi := m.machineInfo
 		left[0] = indent + stat("Machine", mi.Name)
 		left[1] = indent + stat("CPU", fmt.Sprintf("%d", mi.CPUs))
-		left[2] = indent + stat("Mem", formatMachineMem(mi.MemoryMB))
-		left[3] = indent + stat("Disk", fmt.Sprintf("%d GiB", mi.DiskGB))
+
+		memPart := stat("Mem", formatMachineMem(mi.MemoryMB))
+		diskPart := stat("Disk", fmt.Sprintf("%d GiB", mi.DiskGB))
+		if si := m.systemInfo; si != nil {
+			if si.MemTotalBytes > 0 {
+				memPart += " " + renderUsageBar(si.MemTotalBytes-si.MemFreeBytes, si.MemTotalBytes, 12)
+			}
+			if si.DiskTotalBytes > 0 {
+				diskPart += " " + renderUsageBar(si.DiskUsedBytes, si.DiskTotalBytes, 12)
+			}
+		}
+		left[2] = indent + memPart
+		left[3] = indent + diskPart
 	}
 
 	// Right column: system df (one item per line).

@@ -34,6 +34,12 @@ type MachineInfoLoadedMsg struct {
 	Err  error
 }
 
+// SystemInfoLoadedMsg is sent when live host resource usage has been fetched.
+type SystemInfoLoadedMsg struct {
+	Info *models.SystemInfo
+	Err  error
+}
+
 // PruneDoneMsg is sent after a system prune completes.
 type PruneDoneMsg struct {
 	Reclaimed string // human-readable reclaimed space, e.g. "293.8 MB"

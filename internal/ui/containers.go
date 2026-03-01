@@ -302,11 +302,11 @@ func (m *ContainersModel) selectedContainer() *models.Container {
 
 // confirmDelete sets the pending spinner state and returns the delete command.
 // Called by AppModel after the user confirms the deletion dialog.
-func (m *ContainersModel) confirmDelete(id string) tea.Cmd {
+func (m *ContainersModel) confirmDelete(id string, force bool) tea.Cmd {
 	m.actionPendingID = id
 	m.rebuildRows(m.containers)
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
-		return ContainerActionDoneMsg{Err: m.service.RemoveContainer(id, false)}
+		return ContainerActionDoneMsg{Err: m.service.RemoveContainer(id, force)}
 	})
 }
 

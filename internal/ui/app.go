@@ -104,7 +104,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.deleteConfirmContainer != nil {
 			if msg.String() == "enter" {
-				cmds = append(cmds, m.containers.confirmDelete(m.deleteConfirmContainer.ID))
+				force := m.deleteConfirmContainer.Status == models.StatusRunning
+				cmds = append(cmds, m.containers.confirmDelete(m.deleteConfirmContainer.ID, force))
 			}
 			m.deleteConfirmContainer = nil
 		} else if m.pruneConfirm {
@@ -251,15 +252,23 @@ func (m AppModel) renderDeleteConfirmDialog() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")).Render("Delete Container")
 	name := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Render(m.deleteConfirmContainer.Name)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
+	lines := []string{
 		center.Render(title),
 		"",
-		"Remove "+name+"?",
-		dim.Render("This cannot be undone."),
-		"",
-		center.Render(dim.Render("enter:confirm   esc:cancel")),
-	)
-	return dialogStyle.BorderForeground(lipgloss.Color("196")).Render(content)
+		"Remove " + name + "?",
+	}
+	if m.deleteConfirmContainer.Status == models.StatusRunning {
+		lines = append(lines,
+			"",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("⚠ Container is running."),
+			dim.Render("It will be force-stopped first."),
+		)
+	} else {
+		lines = append(lines, dim.Render("This cannot be undone."))
+	}
+	lines = append(lines, "", center.Render(dim.Render("enter:confirm   esc:cancel")))
+
+	return dialogStyle.BorderForeground(lipgloss.Color("196")).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func (m AppModel) renderLoadingDialog() string {

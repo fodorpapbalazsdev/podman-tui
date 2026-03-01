@@ -32,6 +32,7 @@ type AppModel struct {
 	pruneDone      bool   // true while the result dialog is visible
 	pruneReclaimed string // reclaimed space reported by podman (may be empty)
 	pruneErr       error  // non-nil if the prune failed
+	loadingMsg     string // non-empty while logs/inspect is being fetched
 	width          int
 	height         int
 	service        *podman.Service
@@ -118,12 +119,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ShowLogsMsg:
 		con := msg.Container
 		svc := m.service
+		m.loadingMsg = "Fetching logs for " + con.Name + "…"
 		return m, func() tea.Msg {
 			text, err := svc.GetContainerLogsRaw(con.ID, defaultLogLines)
 			return logsReadyMsg{text: text, name: con.Name, err: err}
 		}
 
 	case logsReadyMsg:
+		m.loadingMsg = ""
 		if msg.err != nil {
 			break
 		}
@@ -141,12 +144,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ShowInspectMsg:
 		con := msg.Container
 		svc := m.service
+		m.loadingMsg = "Fetching inspect for " + con.Name + "…"
 		return m, func() tea.Msg {
 			json, err := svc.GetContainerInspectJSON(con.ID)
 			return inspectReadyMsg{json: json, name: con.Name, err: err}
 		}
 
 	case inspectReadyMsg:
+		m.loadingMsg = ""
 		if msg.err != nil {
 			break
 		}
@@ -204,6 +209,9 @@ func (m AppModel) View() string {
 	}
 
 	// Modal dialogs float over the dimmed background.
+	if m.loadingMsg != "" {
+		return placeOverlay(m.renderLoadingDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
 	if m.pruneConfirm {
 		return placeOverlay(m.renderPruneConfirmDialog(), dimBackground(m.normalView()), m.width, m.height)
 	}
@@ -222,6 +230,12 @@ func (m AppModel) normalView() string {
 }
 
 const dialogContentW = 38
+
+func (m AppModel) renderLoadingDialog() string {
+	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
+	content := center.Render(m.loadingMsg)
+	return dialogStyle.BorderForeground(lipgloss.Color("62")).Render(content)
+}
 
 func (m AppModel) renderPruneConfirmDialog() string {
 	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)

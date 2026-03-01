@@ -56,8 +56,18 @@ func (m SystemDFModel) fetchSystemInfo() tea.Cmd {
 	}
 }
 
+const sysInfoRefreshInterval = 5 * time.Second
+
+type sysInfoTickMsg struct{}
+
+func tickSysInfo() tea.Cmd {
+	return tea.Tick(sysInfoRefreshInterval, func(time.Time) tea.Msg {
+		return sysInfoTickMsg{}
+	})
+}
+
 func (m SystemDFModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, m.fetchDF(), m.fetchMachineInfo(), m.fetchSystemInfo())
+	return tea.Batch(m.spinner.Tick, m.fetchDF(), m.fetchMachineInfo(), m.fetchSystemInfo(), tickSysInfo())
 }
 
 func (m SystemDFModel) Update(msg tea.Msg) (SystemDFModel, tea.Cmd) {
@@ -76,6 +86,8 @@ func (m SystemDFModel) Update(msg tea.Msg) (SystemDFModel, tea.Cmd) {
 		m.machineInfo = msg.Info
 	case SystemInfoLoadedMsg:
 		m.systemInfo = msg.Info
+	case sysInfoTickMsg:
+		return m, tea.Batch(m.fetchSystemInfo(), tickSysInfo())
 	}
 	return m, nil
 }

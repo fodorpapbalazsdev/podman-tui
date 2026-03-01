@@ -12,12 +12,6 @@ type ContainersLoadedMsg struct {
 	WithStats  bool
 }
 
-// LogsLoadedMsg is sent when container logs have been fetched.
-type LogsLoadedMsg struct {
-	Logs []models.LogEntry
-	Err  error
-}
-
 // SystemDFLoadedMsg is sent when system df info has been fetched.
 type SystemDFLoadedMsg struct {
 	Info *models.SystemDFInfo
@@ -39,9 +33,6 @@ type MachineInfoLoadedMsg struct {
 	Info *models.MachineInfo
 	Err  error
 }
-
-// BackToContainersMsg is sent from the logs window when the user presses Esc.
-type BackToContainersMsg struct{}
 
 // PruneDoneMsg is sent after a system prune completes.
 type PruneDoneMsg struct {

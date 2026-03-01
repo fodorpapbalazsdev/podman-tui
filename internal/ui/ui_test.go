@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,35 +88,6 @@ func TestColorizeTableStatuses_Created(t *testing.T) {
 func TestColorizeTableStatuses_NoMatch(t *testing.T) {
 	input := "some unrelated text"
 	assert.Equal(t, input, colorizeTableStatuses(input))
-}
-
-// ---- logsToContent ----
-
-func TestLogsToContent_Nil(t *testing.T) {
-	assert.Equal(t, "(no log output)", logsToContent(nil))
-}
-
-func TestLogsToContent_EmptySlice(t *testing.T) {
-	assert.Equal(t, "(no log output)", logsToContent([]models.LogEntry{}))
-}
-
-func TestLogsToContent_WithTimestamp(t *testing.T) {
-	ts, _ := time.Parse(time.RFC3339, "2024-01-02T15:04:05Z")
-	logs := []models.LogEntry{{Timestamp: ts, Message: "Hello world"}}
-	assert.Equal(t, "[15:04:05] Hello world\n", logsToContent(logs))
-}
-
-func TestLogsToContent_WithoutTimestamp(t *testing.T) {
-	logs := []models.LogEntry{{Message: "plain message"}}
-	assert.Equal(t, "plain message\n", logsToContent(logs))
-}
-
-func TestLogsToContent_MultipleEntries(t *testing.T) {
-	logs := []models.LogEntry{
-		{Message: "line one"},
-		{Message: "line two"},
-	}
-	assert.Equal(t, "line one\nline two\n", logsToContent(logs))
 }
 
 // ---- containersToRows ----
@@ -216,18 +186,18 @@ func TestContainersModel_AutoRefresh_SkipsWhenFetching(t *testing.T) {
 
 // ---- AppModel navigation ----
 
-func TestAppModel_ShowLogsMsg(t *testing.T) {
+func TestAppModel_ShowLogsMsg_DispatchesCmd(t *testing.T) {
 	m := NewAppModel(nil)
 	con := models.Container{ID: "abc123", Name: "web"}
-	newModel, _ := m.Update(ShowLogsMsg{Container: con})
-	assert.True(t, newModel.(AppModel).showLogs)
+	_, cmd := m.Update(ShowLogsMsg{Container: con})
+	assert.NotNil(t, cmd, "ShowLogsMsg should dispatch a fetch command")
 }
 
-func TestAppModel_BackToContainersMsg(t *testing.T) {
+func TestAppModel_ShowInspectMsg_DispatchesCmd(t *testing.T) {
 	m := NewAppModel(nil)
-	m.showLogs = true
-	newModel, _ := m.Update(BackToContainersMsg{})
-	assert.False(t, newModel.(AppModel).showLogs)
+	con := models.Container{ID: "abc123", Name: "web"}
+	_, cmd := m.Update(ShowInspectMsg{Container: con})
+	assert.NotNil(t, cmd, "ShowInspectMsg should dispatch a fetch command")
 }
 
 func TestAppModel_QuitKey(t *testing.T) {
@@ -313,10 +283,10 @@ func TestAppModel_PruneDone_EnterDismissesWithoutOpeningLogs(t *testing.T) {
 	m.containers, _ = m.containers.Update(ContainersLoadedMsg{Containers: cons, WithStats: true})
 	m.pruneDone = true
 
-	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	app := newModel.(AppModel)
 	assert.False(t, app.pruneDone, "dialog should be dismissed")
-	assert.False(t, app.showLogs, "logs must NOT be opened")
+	assert.Nil(t, cmd, "no command should be dispatched (logs must NOT be opened)")
 }
 
 // ---- ContainersModel key bindings ----

@@ -22,14 +22,12 @@ import (
 //	│ Disk: …     │  Reclaimable: …        │
 //	╰──────────────────────────────────────╯
 //	╭──────────────────────────────────────╮
-//	│ containers table  OR  log viewer     │  ← main content
+//	│ containers table                     │  ← main content
 //	╰──────────────────────────────────────╯
 //	  status / keybinding hint               ← 1 line
 type AppModel struct {
 	containers     ContainersModel
-	logs           LogsModel
 	systemDF       SystemDFModel
-	showLogs       bool
 	pruneConfirm   bool
 	pruneDone      bool   // true while the result dialog is visible
 	pruneReclaimed string // reclaimed space reported by podman (may be empty)
@@ -39,20 +37,30 @@ type AppModel struct {
 	service        *podman.Service
 }
 
-// inspectReadyMsg carries the raw JSON from podman container inspect.
-type inspectReadyMsg struct {
-	json string
+// Internal messages for the bat ExecProcess flow.
+
+type logsReadyMsg struct {
+	text string
+	name string
 	err  error
 }
 
-// inspectExitedMsg is sent when the bat process exits.
+type logsExitedMsg struct{ err error }
+
+type inspectReadyMsg struct {
+	json string
+	name string
+	err  error
+}
+
 type inspectExitedMsg struct{ err error }
+
+const defaultLogLines = 200
 
 // NewAppModel constructs the root model.
 func NewAppModel(svc *podman.Service) AppModel {
 	m := AppModel{
 		containers: newContainersModel(svc),
-		logs:       newLogsModel(svc),
 		systemDF:   newSystemDFModel(svc),
 		service:    svc,
 	}
@@ -63,7 +71,6 @@ func NewAppModel(svc *podman.Service) AppModel {
 func (m AppModel) Init() tea.Cmd {
 	return tea.Batch(
 		m.containers.Init(),
-		m.logs.Init(),
 		m.systemDF.Init(),
 	)
 }
@@ -97,66 +104,67 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.pruneCmd())
 			}
 			m.pruneConfirm = false
-		} else if m.showLogs {
-			var cmd tea.Cmd
-			m.logs, cmd = m.logs.Update(msg)
-			cmds = append(cmds, cmd)
 		} else {
 			if msg.String() == "P" {
 				m.pruneConfirm = true
 			} else {
-				// Keys go to containers.
 				var cmd tea.Cmd
 				m.containers, cmd = m.containers.Update(msg)
 				cmds = append(cmds, cmd)
 			}
 		}
 
-	// ---- navigation between views ----
+	// ---- bat-backed views ----
 	case ShowLogsMsg:
-		m.showLogs = true
-		m.applyLayout()
-		var cmd tea.Cmd
-		m.logs, cmd = m.logs.Update(msg)
-		cmds = append(cmds, cmd)
+		con := msg.Container
+		svc := m.service
+		return m, func() tea.Msg {
+			text, err := svc.GetContainerLogsRaw(con.ID, defaultLogLines)
+			return logsReadyMsg{text: text, name: con.Name, err: err}
+		}
+
+	case logsReadyMsg:
+		if msg.err != nil {
+			break
+		}
+		batCmd := exec.Command("bat",
+			"--language=log", "--paging=always",
+			"--file-name", msg.name+" (logs)")
+		batCmd.Stdin = strings.NewReader(msg.text)
+		return m, tea.ExecProcess(batCmd, func(err error) tea.Msg {
+			return logsExitedMsg{err: err}
+		})
+
+	case logsExitedMsg:
+		// TUI resumes automatically; nothing to do.
 
 	case ShowInspectMsg:
-		// Fetch inspect JSON asynchronously, then hand off to bat.
 		con := msg.Container
 		svc := m.service
 		return m, func() tea.Msg {
 			json, err := svc.GetContainerInspectJSON(con.ID)
-			return inspectReadyMsg{json: json, err: err}
+			return inspectReadyMsg{json: json, name: con.Name, err: err}
 		}
 
 	case inspectReadyMsg:
 		if msg.err != nil {
-			// Surface the error via the containers model error state.
-			// (Simplest approach: nothing to show inline; user sees nothing changed.)
 			break
 		}
-		batCmd := exec.Command("bat", "--language=json", "--paging=always")
+		batCmd := exec.Command("bat",
+			"--language=json", "--paging=always",
+			"--file-name", msg.name+".json")
 		batCmd.Stdin = strings.NewReader(msg.json)
 		return m, tea.ExecProcess(batCmd, func(err error) tea.Msg {
 			return inspectExitedMsg{err: err}
 		})
 
 	case inspectExitedMsg:
-		// TUI has already resumed; nothing to do.
-
-	case BackToContainersMsg:
-		m.showLogs = false
-		m.applyLayout()
+		// TUI resumes automatically; nothing to do.
 
 	// ---- data messages ----
 	case ContainersLoadedMsg, ContainerActionDoneMsg:
 		var cmd tea.Cmd
 		m.containers, cmd = m.containers.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case LogsLoadedMsg:
-		var cmd tea.Cmd
-		m.logs, cmd = m.logs.Update(msg)
 		cmds = append(cmds, cmd)
 
 	case SystemDFLoadedMsg, MachineInfoLoadedMsg:
@@ -178,11 +186,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	default:
 		// Spinner ticks and other internal messages.
-		var c1, c2, c3 tea.Cmd
+		var c1, c2 tea.Cmd
 		m.containers, c1 = m.containers.Update(msg)
-		m.logs, c2 = m.logs.Update(msg)
-		m.systemDF, c3 = m.systemDF.Update(msg)
-		cmds = append(cmds, c1, c2, c3)
+		m.systemDF, c2 = m.systemDF.Update(msg)
+		cmds = append(cmds, c1, c2)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -210,18 +217,8 @@ func (m AppModel) View() string {
 func (m AppModel) normalView() string {
 	innerW := m.width - 2 // border adds 1 char on each side
 	header := focusedBorder.Width(innerW).Render(m.systemDF.HeaderView(innerW))
-
-	border := focusedBorder.Width(m.width - 2).Height(m.mainHeight())
-	var main string
-	if m.showLogs {
-		main = border.Render(m.logs.View())
-	} else {
-		main = border.Render(m.containers.View())
-	}
-
-	statusBar := m.renderStatusBar()
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, main, statusBar)
+	main := focusedBorder.Width(m.width - 2).Height(m.mainHeight()).Render(m.containers.View())
+	return lipgloss.JoinVertical(lipgloss.Left, header, main, m.renderStatusBar())
 }
 
 const dialogContentW = 38
@@ -292,16 +289,7 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	var hint string
-	if m.showLogs {
-		name := "none"
-		if m.logs.container != nil {
-			name = m.logs.container.Name
-		}
-		hint = "Logs: " + name + "  │  r:refresh  c:clear  ↑↓/PgUp/PgDn:scroll  esc:back  q:quit"
-	} else {
-		hint = "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  q:quit"
-	}
+	hint := "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  q:quit"
 	return statusStyle.Width(m.width).Render(hint)
 }
 
@@ -319,5 +307,4 @@ func (m *AppModel) applyLayout() {
 	innerW := m.width - 4 // subtract border (2) + padding (2)
 	innerH := m.mainHeight()
 	m.containers.SetSize(innerW, innerH)
-	m.logs.SetSize(innerW, innerH)
 }

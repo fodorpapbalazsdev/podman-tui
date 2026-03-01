@@ -256,6 +256,17 @@ func (s *Service) GetContainerInspectJSON(id string) (string, error) {
 	return stdout, nil
 }
 
+// GetContainerLogsRaw returns the raw text output of podman logs (stdout + stderr combined).
+func (s *Service) GetContainerLogsRaw(id string, lines int) (string, error) {
+	stdout, stderr, code := s.runCommand(
+		"logs", "--tail", strconv.Itoa(lines), "--timestamps", id,
+	)
+	if code != 0 {
+		return "", fmt.Errorf("podman logs: %s", strings.TrimSpace(stderr))
+	}
+	return stdout + stderr, nil
+}
+
 // GetContainerLogs retrieves the last `lines` log lines for a container.
 func (s *Service) GetContainerLogs(id string, lines int) ([]models.LogEntry, error) {
 	stdout, stderr, code := s.runCommand(

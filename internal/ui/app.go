@@ -435,7 +435,7 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	hint := "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  L:presets  q:quit"
+	hint := "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  L:presets  ng:jump  q:quit"
 	return statusStyle.Width(m.width).Render(hint)
 }
 

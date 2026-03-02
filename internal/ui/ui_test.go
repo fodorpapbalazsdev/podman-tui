@@ -107,13 +107,14 @@ func TestContainersToRows_Fields(t *testing.T) {
 	rows := containersToRows(cons)
 	require.Len(t, rows, 1)
 	r := rows[0]
-	assert.Equal(t, "web", r[0])
-	assert.Equal(t, "abc123def456", r[1]) // ID truncated to 12 chars
-	assert.Equal(t, "nginx:latest", r[2])
-	assert.Equal(t, "running", r[3])
-	assert.Equal(t, "0.0.0.0:80→80/tcp", r[4])
-	assert.Equal(t, "50MiB / 2GiB", r[5])
-	assert.Equal(t, "0.50%", r[6])
+	assert.Equal(t, " 1", r[0]) // line number
+	assert.Equal(t, "web", r[1])
+	assert.Equal(t, "abc123def456", r[2]) // ID truncated to 12 chars
+	assert.Equal(t, "nginx:latest", r[3])
+	assert.Equal(t, "running", r[4])
+	assert.Equal(t, "0.0.0.0:80→80/tcp", r[5])
+	assert.Equal(t, "50MiB / 2GiB", r[6])
+	assert.Equal(t, "0.50%", r[7])
 }
 
 func TestContainersToRows_ShortID(t *testing.T) {
@@ -121,7 +122,7 @@ func TestContainersToRows_ShortID(t *testing.T) {
 		{ID: "short", Name: "c", Status: models.StatusRunning},
 	}
 	rows := containersToRows(cons)
-	assert.Equal(t, "short", rows[0][1])
+	assert.Equal(t, "short", rows[0][2])
 }
 
 func TestContainersToRows_Empty(t *testing.T) {
@@ -140,19 +141,19 @@ func TestBuildGroupedRows_ComposeGroupsFirst(t *testing.T) {
 
 	// row 0: group header for "myapp"
 	require.Greater(t, len(rows), 0)
-	assert.Equal(t, "◆ myapp", rows[0][0])
-	assert.Equal(t, "", rows[0][1], "group header should have empty ID")
+	assert.Equal(t, "◆ myapp", rows[0][1])
+	assert.Equal(t, "", rows[0][2], "group header should have empty ID")
 
 	// rows 1 & 2: compose containers (sorted by name: db, web) — indented
-	assert.Equal(t, "  db", rows[1][0])
-	assert.Equal(t, "  web", rows[2][0])
+	assert.Equal(t, "  db", rows[1][1])
+	assert.Equal(t, "  web", rows[2][1])
 
 	// row 3: separator between group and standalone
-	assert.Equal(t, "", rows[3][1], "separator row should have empty ID")
+	assert.Equal(t, "", rows[3][2], "separator row should have empty ID")
 
 	// row 4: standalone container (no indentation)
 	require.Greater(t, len(rows), 4)
-	assert.Equal(t, "standalone", rows[4][0])
+	assert.Equal(t, "standalone", rows[4][1])
 }
 
 func TestBuildGroupedRows_PendingStatusPlaceholder(t *testing.T) {
@@ -163,7 +164,7 @@ func TestBuildGroupedRows_PendingStatusPlaceholder(t *testing.T) {
 
 	// row 0 is header, row 1 is the container
 	require.Len(t, rows, 2)
-	assert.Equal(t, pendingStatusPlaceholder, rows[1][3], "pending container should have placeholder status")
+	assert.Equal(t, pendingStatusPlaceholder, rows[1][4], "pending container should have placeholder status")
 }
 
 func TestBuildGroupedRows_NoCompose(t *testing.T) {
@@ -175,8 +176,8 @@ func TestBuildGroupedRows_NoCompose(t *testing.T) {
 
 	// No group headers; sorted by name.
 	require.Len(t, rows, 2)
-	assert.Equal(t, "alpha", rows[0][0])
-	assert.Equal(t, "beta", rows[1][0])
+	assert.Equal(t, "alpha", rows[0][1])
+	assert.Equal(t, "beta", rows[1][1])
 }
 
 // ---- ContainersModel update logic ----

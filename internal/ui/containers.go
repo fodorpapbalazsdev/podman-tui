@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ type ContainersModel struct {
 	err             error
 	service         *podman.Service
 	containers      []models.Container
+	numberMap       []int   // numberMap[i] = table row index of container number i+1
+	digitBuf        string  // accumulates typed digits for nG jump (e.g. "10" → press g → jump to #10)
 	width           int
 	height          int
 }
@@ -41,6 +44,7 @@ func newContainersModel(svc *podman.Service) ContainersModel {
 	sp.Style = lipgloss.NewStyle() // coloring is applied by injectActionSpinner at render time
 
 	cols := []table.Column{
+		{Title: "#", Width: 2},
 		{Title: "Name", Width: 20},
 		{Title: "ID", Width: 12},
 		{Title: "Image", Width: 30},
@@ -215,7 +219,23 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				cmds = append(cmds, func() tea.Msg { return ShowDeleteConfirmMsg{Container: c} })
 			}
 
+		case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+			m.digitBuf += msg.String()
+
+		case "g":
+			if m.digitBuf != "" {
+				if n, err := strconv.Atoi(m.digitBuf); err == nil && n > 0 && n-1 < len(m.numberMap) {
+					m.table.SetCursor(m.numberMap[n-1])
+				}
+				m.digitBuf = ""
+			} else {
+				var cmd tea.Cmd
+				m.table, cmd = m.table.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+
 		default:
+			m.digitBuf = ""
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
 			cmds = append(cmds, cmd)
@@ -232,6 +252,10 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 
 func (m ContainersModel) View() string {
 	title := titleStyle.Render("Containers")
+	if m.digitBuf != "" {
+		jump := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render(m.digitBuf)
+		title = title + "  " + jump
+	}
 
 	var body string
 	if m.loading {
@@ -276,6 +300,7 @@ func (m *ContainersModel) SetSize(w, h int) {
 		portsW = 12
 	}
 	m.table.SetColumns([]table.Column{
+		{Title: "#", Width: 2},
 		{Title: "Name", Width: nameW},
 		{Title: "ID", Width: idW},
 		{Title: "Image", Width: imgW},
@@ -288,10 +313,10 @@ func (m *ContainersModel) SetSize(w, h int) {
 
 func (m *ContainersModel) selectedContainer() *models.Container {
 	row := m.table.SelectedRow()
-	if row == nil || row[1] == "" { // empty ID means a group header row
+	if row == nil || row[2] == "" { // empty ID means a group header or separator row
 		return nil
 	}
-	shortID := row[1]
+	shortID := row[2]
 	for i, c := range m.containers {
 		if strings.HasPrefix(c.ID, shortID) {
 			return &m.containers[i]
@@ -311,8 +336,16 @@ func (m *ContainersModel) confirmDelete(id string, force bool) tea.Cmd {
 }
 
 // rebuildRows rebuilds the table with compose grouping and the action spinner placeholder.
+// It also recomputes numberMap so digit keys can jump to the right table row.
 func (m *ContainersModel) rebuildRows(containers []models.Container) {
-	m.table.SetRows(buildGroupedRows(containers, m.actionPendingID))
+	rows := buildGroupedRows(containers, m.actionPendingID)
+	m.table.SetRows(rows)
+	m.numberMap = nil
+	for i, row := range rows {
+		if row[2] != "" { // non-empty ID column = actual container row
+			m.numberMap = append(m.numberMap, i)
+		}
+	}
 }
 
 // buildGroupedRows returns table rows sorted and grouped by compose project.
@@ -350,30 +383,33 @@ func buildGroupedRows(containers []models.Container, pendingID string) []table.R
 	}
 	sort.Slice(standalone, func(i, j int) bool { return standalone[i].Name < standalone[j].Name })
 
-	sep := table.Row{"", "", "", "", "", "", ""}
+	sep := table.Row{"", "", "", "", "", "", "", ""}
 
 	var rows []table.Row
+	containerNum := 0
 	for i, g := range groups {
 		if i > 0 {
 			rows = append(rows, sep)
 		}
 		// Group header row: name column holds the project label; ID column is empty
 		// so selectedContainer() skips it (empty ID never matches a real container).
-		rows = append(rows, table.Row{"◆ " + g.project, "", "", "", "", "", ""})
+		rows = append(rows, table.Row{"", "◆ " + g.project, "", "", "", "", "", ""})
 		for _, c := range g.containers {
-			rows = append(rows, containerRow(c, pendingID, true))
+			containerNum++
+			rows = append(rows, containerRow(c, pendingID, true, containerNum))
 		}
 	}
 	if len(groups) > 0 && len(standalone) > 0 {
 		rows = append(rows, sep)
 	}
 	for _, c := range standalone {
-		rows = append(rows, containerRow(c, pendingID, false))
+		containerNum++
+		rows = append(rows, containerRow(c, pendingID, false, containerNum))
 	}
 	return rows
 }
 
-func containerRow(c models.Container, pendingID string, inGroup bool) table.Row {
+func containerRow(c models.Container, pendingID string, inGroup bool, num int) table.Row {
 	shortID := c.ID
 	if len(shortID) > 12 {
 		shortID = shortID[:12]
@@ -387,6 +423,7 @@ func containerRow(c models.Container, pendingID string, inGroup bool) table.Row 
 		name = "  " + name
 	}
 	return table.Row{
+		fmt.Sprintf("%2d", num),
 		name,
 		shortID,
 		truncate(c.Image, 30),
@@ -412,8 +449,8 @@ func (m ContainersModel) injectActionSpinner(s string) string {
 	// Check whether the pending container is currently the highlighted row.
 	// Group header rows have an empty ID column — skip those.
 	selectedIsPending := false
-	if row := m.table.SelectedRow(); row != nil && row[1] != "" {
-		selectedIsPending = strings.HasPrefix(m.actionPendingID, row[1])
+	if row := m.table.SelectedRow(); row != nil && row[2] != "" {
+		selectedIsPending = strings.HasPrefix(m.actionPendingID, row[2])
 	}
 
 	var replacement string
@@ -427,15 +464,14 @@ func (m ContainersModel) injectActionSpinner(s string) string {
 
 func containersToRows(containers []models.Container) []table.Row {
 	rows := make([]table.Row, 0, len(containers))
-	for _, c := range containers {
+	for i, c := range containers {
 		shortID := c.ID
 		if len(shortID) > 12 {
 			shortID = shortID[:12]
 		}
-
 		ports := formatPorts(c.Ports)
-
 		rows = append(rows, table.Row{
+			fmt.Sprintf("%2d", i+1),
 			c.Name,
 			shortID,
 			truncate(c.Image, 30),

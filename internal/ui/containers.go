@@ -175,7 +175,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			}
 
 		case "s":
-			if con := m.selectedContainer(); con != nil {
+			if group := m.selectedGroupName(); group != "" {
+				cmds = append(cmds, m.startGroupCmd(group))
+			} else if con := m.selectedContainer(); con != nil {
 				id := con.ID
 				m.actionPendingID = id
 				m.rebuildRows(m.containers)
@@ -185,7 +187,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			}
 
 		case "t":
-			if con := m.selectedContainer(); con != nil {
+			if group := m.selectedGroupName(); group != "" {
+				cmds = append(cmds, m.stopGroupCmd(group))
+			} else if con := m.selectedContainer(); con != nil {
 				id := con.ID
 				m.actionPendingID = id
 				m.rebuildRows(m.containers)
@@ -240,14 +244,14 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
 			cmds = append(cmds, cmd)
-			m.skipNonContainerRows(-1)
+			m.skipSeparatorRows(-1)
 
 		case "down", "j":
 			m.digitBuf = ""
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
 			cmds = append(cmds, cmd)
-			m.skipNonContainerRows(1)
+			m.skipSeparatorRows(1)
 
 		default:
 			m.digitBuf = ""
@@ -363,15 +367,71 @@ func (m *ContainersModel) rebuildRows(containers []models.Container) {
 	}
 }
 
-// skipNonContainerRows advances the table cursor past separator and group-header rows
-// in the given direction (+1 = down, -1 = up).
-func (m *ContainersModel) skipNonContainerRows(dir int) {
+// skipSeparatorRows advances the table cursor past blank separator rows in the
+// given direction (+1 = down, -1 = up). Group-header rows are NOT skipped so
+// that the user can press s/t on them to act on the whole group.
+func (m *ContainersModel) skipSeparatorRows(dir int) {
 	cursor := m.table.Cursor()
-	for cursor >= 0 && cursor < len(m.rows) && m.rows[cursor][2] == "" {
+	for cursor >= 0 && cursor < len(m.rows) {
+		row := m.rows[cursor]
+		// Stop at real container rows or group-header rows; skip blank separator rows.
+		if row[2] != "" || strings.HasPrefix(row[1], "◆ ") {
+			break
+		}
 		cursor += dir
 	}
 	if cursor >= 0 && cursor < len(m.rows) {
 		m.table.SetCursor(cursor)
+	}
+}
+
+// selectedGroupName returns the compose project name when the cursor is on a
+// group-header row, or "" otherwise.
+func (m *ContainersModel) selectedGroupName() string {
+	row := m.table.SelectedRow()
+	if row == nil {
+		return ""
+	}
+	return strings.TrimPrefix(row[1], "◆ ")
+}
+
+// startGroupCmd starts all non-running containers that belong to project.
+func (m ContainersModel) startGroupCmd(project string) tea.Cmd {
+	var ids []string
+	for _, c := range m.containers {
+		if c.ComposeProject == project && c.Status != models.StatusRunning {
+			ids = append(ids, c.ID)
+		}
+	}
+	svc := m.service
+	return func() tea.Msg {
+		var lastErr error
+		for _, id := range ids {
+			if err := svc.StartContainer(id); err != nil {
+				lastErr = err
+			}
+		}
+		return ContainerActionDoneMsg{Err: lastErr}
+	}
+}
+
+// stopGroupCmd stops all running containers that belong to project.
+func (m ContainersModel) stopGroupCmd(project string) tea.Cmd {
+	var ids []string
+	for _, c := range m.containers {
+		if c.ComposeProject == project && c.Status == models.StatusRunning {
+			ids = append(ids, c.ID)
+		}
+	}
+	svc := m.service
+	return func() tea.Msg {
+		var lastErr error
+		for _, id := range ids {
+			if err := svc.StopContainer(id); err != nil {
+				lastErr = err
+			}
+		}
+		return ContainerActionDoneMsg{Err: lastErr}
 	}
 }
 

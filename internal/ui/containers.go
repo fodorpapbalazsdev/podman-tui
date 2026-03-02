@@ -437,7 +437,7 @@ func (m *ContainersModel) skipSeparatorRows(dir int) {
 	for cursor >= 0 && cursor < len(m.rows) {
 		row := m.rows[cursor]
 		// Stop at real container rows or group-header rows; skip blank separator rows.
-		if row[2] != "" || row[0] == "◆" {
+		if row[2] != "" || strings.HasSuffix(row[0], "◆") {
 			break
 		}
 		cursor += dir
@@ -451,7 +451,7 @@ func (m *ContainersModel) skipSeparatorRows(dir int) {
 // group-header row, or "" otherwise.
 func (m *ContainersModel) selectedGroupName() string {
 	row := m.table.SelectedRow()
-	if row == nil || row[0] != "◆" {
+	if row == nil || !strings.HasSuffix(row[0], "◆") {
 		return ""
 	}
 	return row[1]
@@ -488,19 +488,29 @@ func (m ContainersModel) startGroupCmd(project string) tea.Cmd {
 	}
 }
 
-// stopGroupCmd stops all running containers that belong to project.
+// stopGroupCmd stops all running/paused containers that belong to project.
 func (m ContainersModel) stopGroupCmd(project string) tea.Cmd {
-	var ids []string
+	type entry struct {
+		id     string
+		paused bool
+	}
+	var entries []entry
 	for _, c := range m.containers {
 		if c.ComposeProject == project && (c.Status == models.StatusRunning || c.Status == models.StatusPaused) {
-			ids = append(ids, c.ID)
+			entries = append(entries, entry{id: c.ID, paused: c.Status == models.StatusPaused})
 		}
 	}
 	svc := m.service
 	return func() tea.Msg {
 		var lastErr error
-		for _, id := range ids {
-			if err := svc.StopContainer(id); err != nil {
+		for _, e := range entries {
+			if e.paused {
+				if err := svc.UnpauseContainer(e.id); err != nil {
+					lastErr = err
+					continue
+				}
+			}
+			if err := svc.StopContainer(e.id); err != nil {
 				lastErr = err
 			}
 		}

@@ -534,13 +534,28 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	var hint string
-	if m.containers.selectedGroupName() != "" {
-		hint = "r:refresh  s:start  t:stop  P:prune  L:presets  ng:jump  q:quit"
-	} else {
-		hint = "r:refresh  enter/l:logs  i:inspect  p:ports  s:start  t:stop  m:more  d:delete  P:prune  L:presets  ng:jump  q:quit"
+	parts := []string{"r:refresh"}
+
+	if group := m.containers.selectedGroupName(); group != "" {
+		if m.containers.groupHasStartable(group) {
+			parts = append(parts, "s:start")
+		}
+		if m.containers.groupHasStoppable(group) {
+			parts = append(parts, "t:stop")
+		}
+	} else if con := m.containers.selectedContainer(); con != nil {
+		parts = append(parts, "enter/l:logs", "i:inspect", "p:ports")
+		if con.Status != models.StatusRunning {
+			parts = append(parts, "s:start")
+		}
+		if con.Status == models.StatusRunning || con.Status == models.StatusPaused {
+			parts = append(parts, "t:stop", "m:more")
+		}
+		parts = append(parts, "d:delete")
 	}
-	return statusStyle.Width(m.width).Render(hint)
+
+	parts = append(parts, "P:prune", "L:presets", "ng:jump", "q:quit")
+	return statusStyle.Width(m.width).Render(strings.Join(parts, "  "))
 }
 
 func (m AppModel) pruneCmd() tea.Cmd {

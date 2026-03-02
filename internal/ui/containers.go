@@ -465,6 +465,26 @@ func (m *ContainersModel) selectedGroupName() string {
 	return row[1]
 }
 
+// groupHasStartable reports whether the compose group has any container that can be started.
+func (m *ContainersModel) groupHasStartable(project string) bool {
+	for _, c := range m.containers {
+		if c.ComposeProject == project && c.Status != models.StatusRunning {
+			return true
+		}
+	}
+	return false
+}
+
+// groupHasStoppable reports whether the compose group has any container that can be stopped.
+func (m *ContainersModel) groupHasStoppable(project string) bool {
+	for _, c := range m.containers {
+		if c.ComposeProject == project && (c.Status == models.StatusRunning || c.Status == models.StatusPaused) {
+			return true
+		}
+	}
+	return false
+}
+
 // startGroupCmd starts all non-running containers that belong to project.
 // Paused containers are unpaused; stopped/created containers are started.
 func (m ContainersModel) startGroupCmd(project string) tea.Cmd {

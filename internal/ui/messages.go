@@ -62,5 +62,10 @@ type PresetRunDoneMsg struct {
 	Err error
 }
 
+// ShowPortsMsg requests the port-forwards dialog for a container.
+type ShowPortsMsg struct {
+	Container models.Container
+}
+
 // autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
 type autoRefreshMsg struct{}

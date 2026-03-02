@@ -37,6 +37,7 @@ type AppModel struct {
 	pruneErr               error             // non-nil if the prune failed
 	loadingMsg             string            // non-empty while logs/inspect is being fetched
 	deleteConfirmContainer *models.Container // non-nil while delete confirm dialog is shown
+	portsContainer         *models.Container // non-nil while port-forwards dialog is shown
 	presets                []config.Preset
 	presetsVisible         bool
 	presetsIdx             int
@@ -105,6 +106,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pruneDone = false
 			m.pruneReclaimed = ""
 			m.pruneErr = nil
+			break
+		}
+
+		if m.portsContainer != nil {
+			m.portsContainer = nil
 			break
 		}
 
@@ -216,6 +222,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		con := msg.Container
 		m.deleteConfirmContainer = &con
 
+	case ShowPortsMsg:
+		con := msg.Container
+		m.portsContainer = &con
+
 	case PresetRunDoneMsg:
 		// Refresh the container list so any newly created container appears.
 		var cmd tea.Cmd
@@ -279,6 +289,9 @@ func (m AppModel) View() string {
 	}
 	if m.pruneDone {
 		return placeOverlay(m.renderPruneResultDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
+	if m.portsContainer != nil {
+		return placeOverlay(m.renderPortsDialog(), dimBackground(m.normalView()), m.width, m.height)
 	}
 
 	return m.normalView()
@@ -425,6 +438,29 @@ func (m AppModel) renderPruneResultDialog() string {
 	return dialogStyle.BorderForeground(borderColor).Render(content)
 }
 
+func (m AppModel) renderPortsDialog() string {
+	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render("Port Forwards")
+	name := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Render(m.portsContainer.Name)
+
+	lines := []string{center.Render(title), "", name, ""}
+
+	if len(m.portsContainer.Ports) == 0 {
+		lines = append(lines, dim.Render("no port forwards"))
+	} else {
+		for _, p := range m.portsContainer.Ports {
+			host := p.HostIP + ":" + p.HostPort
+			lines = append(lines, host+" → "+p.ContainerPort+"/"+p.Protocol)
+		}
+	}
+
+	lines = append(lines, "", center.Render(dim.Render("press any key to close")))
+	return dialogStyle.BorderForeground(lipgloss.Color("62")).Render(
+		lipgloss.JoinVertical(lipgloss.Left, lines...),
+	)
+}
+
 // mainHeight is the inner content area height (excluding header + border overhead + status bar).
 func (m AppModel) mainHeight() int {
 	h := m.height - headerH - 1 // 1 for status bar
@@ -435,7 +471,7 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	hint := "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  L:presets  ng:jump  q:quit"
+	hint := "r:refresh  enter/l:logs  i:inspect  f:ports  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  L:presets  ng:jump  q:quit"
 	return statusStyle.Width(m.width).Render(hint)
 }
 

@@ -266,6 +266,12 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				cmds = append(cmds, func() tea.Msg { return ShowDeleteConfirmMsg{Container: c} })
 			}
 
+		case "f":
+			if con := m.selectedContainer(); con != nil {
+				c := *con
+				cmds = append(cmds, func() tea.Msg { return ShowPortsMsg{Container: c} })
+			}
+
 		case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 			m.digitBuf += msg.String()
 

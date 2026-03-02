@@ -263,6 +263,15 @@ func (s *Service) UnpauseContainer(id string) error {
 	return nil
 }
 
+// RestartContainer restarts a running or paused container.
+func (s *Service) RestartContainer(id string) error {
+	_, stderr, code := s.runCommand("restart", id)
+	if code != 0 {
+		return fmt.Errorf("podman restart: %s", strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
 // RemoveContainer removes a container (force=true sends SIGKILL first).
 func (s *Service) RemoveContainer(id string, force bool) error {
 	args := []string{"rm"}

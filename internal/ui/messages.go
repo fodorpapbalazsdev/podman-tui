@@ -67,5 +67,10 @@ type ShowPortsMsg struct {
 	Container models.Container
 }
 
+// ShowMoreMsg requests the "more actions" dialog for a container.
+type ShowMoreMsg struct {
+	Container models.Container
+}
+
 // autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
 type autoRefreshMsg struct{}

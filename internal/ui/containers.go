@@ -229,35 +229,10 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				}
 			}
 
-		case "p":
+		case "m":
 			if con := m.selectedContainer(); con != nil {
-				switch con.Status {
-				case models.StatusRunning:
-					id := con.ID
-					m.actionPendingID = id
-					m.rebuildRows(m.containers)
-					cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-						return ContainerActionDoneMsg{Err: m.service.PauseContainer(id)}
-					})
-				case models.StatusPaused:
-					m.flashMsg = "container is already paused"
-				default:
-					m.flashMsg = "container is not running"
-				}
-			}
-
-		case "u":
-			if con := m.selectedContainer(); con != nil {
-				if con.Status == models.StatusPaused {
-					id := con.ID
-					m.actionPendingID = id
-					m.rebuildRows(m.containers)
-					cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-						return ContainerActionDoneMsg{Err: m.service.UnpauseContainer(id)}
-					})
-				} else {
-					m.flashMsg = "container is not paused"
-				}
+				c := *con
+				cmds = append(cmds, func() tea.Msg { return ShowMoreMsg{Container: c} })
 			}
 
 		case "d":
@@ -266,7 +241,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				cmds = append(cmds, func() tea.Msg { return ShowDeleteConfirmMsg{Container: c} })
 			}
 
-		case "f":
+		case "p":
 			if con := m.selectedContainer(); con != nil {
 				c := *con
 				cmds = append(cmds, func() tea.Msg { return ShowPortsMsg{Container: c} })
@@ -406,6 +381,33 @@ func (m *ContainersModel) confirmDelete(id string, force bool) tea.Cmd {
 	m.rebuildRows(m.containers)
 	return tea.Batch(m.spinner.Tick, func() tea.Msg {
 		return ContainerActionDoneMsg{Err: m.service.RemoveContainer(id, force)}
+	})
+}
+
+// pauseCmd sets the pending spinner state and returns the pause command.
+func (m *ContainersModel) pauseCmd(id string) tea.Cmd {
+	m.actionPendingID = id
+	m.rebuildRows(m.containers)
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		return ContainerActionDoneMsg{Err: m.service.PauseContainer(id)}
+	})
+}
+
+// unpauseCmd sets the pending spinner state and returns the unpause command.
+func (m *ContainersModel) unpauseCmd(id string) tea.Cmd {
+	m.actionPendingID = id
+	m.rebuildRows(m.containers)
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		return ContainerActionDoneMsg{Err: m.service.UnpauseContainer(id)}
+	})
+}
+
+// restartCmd sets the pending spinner state and returns the restart command.
+func (m *ContainersModel) restartCmd(id string) tea.Cmd {
+	m.actionPendingID = id
+	m.rebuildRows(m.containers)
+	return tea.Batch(m.spinner.Tick, func() tea.Msg {
+		return ContainerActionDoneMsg{Err: m.service.RestartContainer(id)}
 	})
 }
 

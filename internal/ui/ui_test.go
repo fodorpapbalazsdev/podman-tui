@@ -399,13 +399,13 @@ func TestContainersModel_ActionKeys_DispatchCmd(t *testing.T) {
 		assert.NotNil(t, cmd, "s should dispatch when container is stopped")
 	})
 
-	// stop/pause/delete operate on a running container.
+	// stop/more/delete operate on a running container.
 	for _, tc := range []struct {
 		name string
 		msg  tea.KeyMsg
 	}{
 		{"stop (t)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}}},
-		{"pause (p)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}}},
+		{"more (m)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}}},
 		{"delete (d)", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -415,14 +415,14 @@ func TestContainersModel_ActionKeys_DispatchCmd(t *testing.T) {
 		})
 	}
 
-	// unpause requires a paused container.
-	t.Run("unpause (u)", func(t *testing.T) {
+	// more (m) also works on a paused container.
+	t.Run("more (m) for paused", func(t *testing.T) {
 		m := newContainersModel(nil)
 		m.SetFocused(true)
 		cons := []models.Container{{ID: "abc123def456", Name: "web", Status: models.StatusPaused}}
 		m, _ = m.Update(ContainersLoadedMsg{Containers: cons, WithStats: true})
-		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
-		assert.NotNil(t, cmd, "u should dispatch when container is paused")
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		assert.NotNil(t, cmd, "m should dispatch when container is paused")
 	})
 
 	// stop (t) also works on paused containers.
@@ -440,7 +440,7 @@ func TestContainersModel_ActionKeys_NoOpWithoutSelection(t *testing.T) {
 	// No containers loaded → no selection → action keys should be no-ops.
 	m := newContainersModel(nil)
 	m.SetFocused(true)
-	for _, r := range []rune{'l', 's', 't', 'p', 'u', 'd'} {
+	for _, r := range []rune{'l', 's', 't', 'm', 'd'} {
 		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		assert.Nil(t, cmd, "key %q should not dispatch when nothing is selected", string(r))
 	}

@@ -38,6 +38,7 @@ type AppModel struct {
 	loadingMsg             string            // non-empty while logs/inspect is being fetched
 	deleteConfirmContainer *models.Container // non-nil while delete confirm dialog is shown
 	portsContainer         *models.Container // non-nil while port-forwards dialog is shown
+	moreContainer          *models.Container // non-nil while "more actions" dialog is shown
 	presets                []config.Preset
 	presetsVisible         bool
 	presetsIdx             int
@@ -111,6 +112,26 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.portsContainer != nil {
 			m.portsContainer = nil
+			break
+		}
+
+		if m.moreContainer != nil {
+			con := m.moreContainer
+			m.moreContainer = nil
+			switch msg.String() {
+			case "p":
+				if con.Status == models.StatusRunning {
+					cmds = append(cmds, m.containers.pauseCmd(con.ID))
+				}
+			case "u":
+				if con.Status == models.StatusPaused {
+					cmds = append(cmds, m.containers.unpauseCmd(con.ID))
+				}
+			case "r":
+				if con.Status == models.StatusRunning || con.Status == models.StatusPaused {
+					cmds = append(cmds, m.containers.restartCmd(con.ID))
+				}
+			}
 			break
 		}
 
@@ -226,6 +247,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		con := msg.Container
 		m.portsContainer = &con
 
+	case ShowMoreMsg:
+		con := msg.Container
+		m.moreContainer = &con
+
 	case PresetRunDoneMsg:
 		// Refresh the container list so any newly created container appears.
 		var cmd tea.Cmd
@@ -292,6 +317,9 @@ func (m AppModel) View() string {
 	}
 	if m.portsContainer != nil {
 		return placeOverlay(m.renderPortsDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
+	if m.moreContainer != nil {
+		return placeOverlay(m.renderMoreDialog(), dimBackground(m.normalView()), m.width, m.height)
 	}
 
 	return m.normalView()
@@ -461,6 +489,41 @@ func (m AppModel) renderPortsDialog() string {
 	)
 }
 
+func (m AppModel) renderMoreDialog() string {
+	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render("More Actions")
+	name := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Render(m.moreContainer.Name)
+
+	key := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62"))
+	active := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	action := func(k, label string, available bool) string {
+		if available {
+			return key.Render(k) + "  " + active.Render(label)
+		}
+		return dim.Render(k + "  " + label)
+	}
+
+	isRunning := m.moreContainer.Status == models.StatusRunning
+	isPaused := m.moreContainer.Status == models.StatusPaused
+
+	lines := []string{
+		center.Render(title),
+		"",
+		name,
+		"",
+		action("p", "pause", isRunning),
+		action("u", "unpause", isPaused),
+		action("r", "restart", isRunning || isPaused),
+		"",
+		center.Render(dim.Render("press any key to close")),
+	}
+	return dialogStyle.BorderForeground(lipgloss.Color("62")).Render(
+		lipgloss.JoinVertical(lipgloss.Left, lines...),
+	)
+}
+
 // mainHeight is the inner content area height (excluding header + border overhead + status bar).
 func (m AppModel) mainHeight() int {
 	h := m.height - headerH - 1 // 1 for status bar
@@ -471,7 +534,7 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	hint := "r:refresh  enter/l:logs  i:inspect  f:ports  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  L:presets  ng:jump  q:quit"
+	hint := "r:refresh  enter/l:logs  i:inspect  p:ports  s:start  t:stop  m:more  d:delete  P:prune  L:presets  ng:jump  q:quit"
 	return statusStyle.Width(m.width).Render(hint)
 }
 

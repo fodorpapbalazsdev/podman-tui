@@ -21,6 +21,20 @@ func TestFormatMachineMem(t *testing.T) {
 	assert.Equal(t, "3.6 GiB", formatMachineMem(3712))
 }
 
+// ---- formatMemory ----
+
+func TestFormatMemory(t *testing.T) {
+	assert.Equal(t, "-", formatMemory("-"))
+	assert.Equal(t, "", formatMemory(""))
+	assert.Equal(t, "no slash", formatMemory("no slash")) // no "/" → passthrough
+	// 50 MiB = 52 MB (decimal); 2 GiB total → 2.4%
+	assert.Equal(t, "52MB (2.4%)", formatMemory("50MiB / 2GiB"))
+	// 1.5 GiB = 1.6 GB; 8 GiB total → 18.8%
+	assert.Equal(t, "1.6GB (18.8%)", formatMemory("1.5GiB / 8GiB"))
+	// 256 MiB = 268 MB; 16 GiB total → 1.6%
+	assert.Equal(t, "268MB (1.6%)", formatMemory("256MiB / 16GiB"))
+}
+
 // ---- formatPorts ----
 
 func TestFormatPorts_Empty(t *testing.T) {

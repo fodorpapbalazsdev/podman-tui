@@ -351,7 +351,7 @@ func (m *ContainersModel) SetSize(w, h int) {
 	imgW := w * 25 / 100
 	statusW := 10
 	portsW := w * 18 / 100
-	memW := 14
+	memW := 15
 	cpuW := 8
 	// clamp
 	if nameW < 10 {
@@ -610,7 +610,7 @@ func containerRow(c models.Container, pendingID string, inGroup bool, num int, n
 		truncate(c.Image, 30),
 		status,
 		formatPorts(c.Ports),
-		c.MemoryUsage,
+		formatMemory(c.MemoryUsage),
 		c.CPUUsage,
 	}
 }
@@ -731,6 +731,61 @@ func colorizeTableStatuses(s string) string {
 		)
 	}
 	return s
+}
+
+// parseMemBytes parses a memory string like "50MiB", "2GiB", "512MB" into bytes.
+func parseMemBytes(s string) float64 {
+	s = strings.TrimSpace(s)
+	lower := strings.ToLower(s)
+	for _, u := range []struct {
+		suffix string
+		factor float64
+	}{
+		{"tib", 1024 * 1024 * 1024 * 1024},
+		{"gib", 1024 * 1024 * 1024},
+		{"mib", 1024 * 1024},
+		{"kib", 1024},
+		{"tb", 1e12},
+		{"gb", 1e9},
+		{"mb", 1e6},
+		{"kb", 1e3},
+		{"b", 1},
+	} {
+		if strings.HasSuffix(lower, u.suffix) {
+			val, err := strconv.ParseFloat(strings.TrimSpace(s[:len(s)-len(u.suffix)]), 64)
+			if err == nil {
+				return val * u.factor
+			}
+		}
+	}
+	return 0
+}
+
+// formatMemory converts a raw "used / total" string from podman stats into
+// a compact "NNmb (X.X%)" display string. Returns the input unchanged when it
+// cannot be parsed (e.g. "-" placeholder).
+func formatMemory(raw string) string {
+	if raw == "" || raw == "-" {
+		return raw
+	}
+	parts := strings.SplitN(raw, "/", 2)
+	if len(parts) != 2 {
+		return raw
+	}
+	used := parseMemBytes(parts[0])
+	total := parseMemBytes(parts[1])
+	if total == 0 {
+		return raw
+	}
+	pct := used / total * 100
+	const gb = 1e9
+	var usedStr string
+	if used >= gb {
+		usedStr = fmt.Sprintf("%.1fGB", used/gb)
+	} else {
+		usedStr = fmt.Sprintf("%.0fMB", used/1e6)
+	}
+	return fmt.Sprintf("%s (%.1f%%)", usedStr, pct)
 }
 
 func formatPorts(ports []models.PortMapping) string {

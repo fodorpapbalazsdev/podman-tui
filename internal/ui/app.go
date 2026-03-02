@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/fpbpi/podman-tui/internal/config"
 	"github.com/fpbpi/podman-tui/internal/models"
 	"github.com/fpbpi/podman-tui/internal/podman"
 )
@@ -27,17 +29,20 @@ import (
 //	╰──────────────────────────────────────╯
 //	  status / keybinding hint               ← 1 line
 type AppModel struct {
-	containers     ContainersModel
-	systemDF       SystemDFModel
-	pruneConfirm   bool
-	pruneDone      bool   // true while the result dialog is visible
-	pruneReclaimed string // reclaimed space reported by podman (may be empty)
-	pruneErr       error  // non-nil if the prune failed
-	loadingMsg           string             // non-empty while logs/inspect is being fetched
+	containers             ContainersModel
+	systemDF               SystemDFModel
+	pruneConfirm           bool
+	pruneDone              bool              // true while the result dialog is visible
+	pruneReclaimed         string            // reclaimed space reported by podman (may be empty)
+	pruneErr               error             // non-nil if the prune failed
+	loadingMsg             string            // non-empty while logs/inspect is being fetched
 	deleteConfirmContainer *models.Container // non-nil while delete confirm dialog is shown
-	width          int
-	height         int
-	service        *podman.Service
+	presets                []config.Preset
+	presetsVisible         bool
+	presetsIdx             int
+	width                  int
+	height                 int
+	service                *podman.Service
 }
 
 // Internal messages for the bat ExecProcess flow.
@@ -61,11 +66,12 @@ type inspectExitedMsg struct{ err error }
 const defaultLogLines = 200
 
 // NewAppModel constructs the root model.
-func NewAppModel(svc *podman.Service) AppModel {
+func NewAppModel(svc *podman.Service, presets []config.Preset) AppModel {
 	m := AppModel{
 		containers: newContainersModel(svc),
 		systemDF:   newSystemDFModel(svc),
 		service:    svc,
+		presets:    presets,
 	}
 	m.containers.SetFocused(true)
 	return m
@@ -102,7 +108,36 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
-		if m.deleteConfirmContainer != nil {
+		if m.presetsVisible {
+			switch msg.String() {
+			case "up", "k":
+				if m.presetsIdx > 0 {
+					m.presetsIdx--
+				}
+			case "down", "j":
+				if m.presetsIdx < len(m.presets)-1 {
+					m.presetsIdx++
+				}
+			case "enter":
+				if len(m.presets) > 0 {
+					preset := m.presets[m.presetsIdx]
+					svc := m.service
+					m.presetsVisible = false
+					cmds = append(cmds, func() tea.Msg {
+						return PresetRunDoneMsg{Err: svc.RunPreset(preset.Command)}
+					})
+				}
+			}
+			if msg.String() != "enter" {
+				// esc or any non-navigation key closes the dialog
+				switch msg.String() {
+				case "up", "k", "down", "j":
+					// handled above, keep dialog open
+				default:
+					m.presetsVisible = false
+				}
+			}
+		} else if m.deleteConfirmContainer != nil {
 			if msg.String() == "enter" {
 				force := m.deleteConfirmContainer.Status == models.StatusRunning
 				cmds = append(cmds, m.containers.confirmDelete(m.deleteConfirmContainer.ID, force))
@@ -116,6 +151,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			if msg.String() == "P" {
 				m.pruneConfirm = true
+			} else if msg.String() == "L" {
+				m.presetsVisible = true
+				m.presetsIdx = 0
 			} else {
 				var cmd tea.Cmd
 				m.containers, cmd = m.containers.Update(msg)
@@ -178,6 +216,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		con := msg.Container
 		m.deleteConfirmContainer = &con
 
+	case PresetRunDoneMsg:
+		// Refresh the container list so any newly created container appears.
+		var cmd tea.Cmd
+		m.containers, cmd = m.containers.Update(ContainerActionDoneMsg{Err: msg.Err})
+		cmds = append(cmds, cmd)
+
 	// ---- data messages ----
 	case ContainersLoadedMsg, ContainerActionDoneMsg:
 		var cmd tea.Cmd
@@ -221,6 +265,9 @@ func (m AppModel) View() string {
 	}
 
 	// Modal dialogs float over the dimmed background.
+	if m.presetsVisible {
+		return placeOverlay(m.renderPresetsDialog(), dimBackground(m.normalView()), m.width, m.height)
+	}
 	if m.deleteConfirmContainer != nil {
 		return placeOverlay(m.renderDeleteConfirmDialog(), dimBackground(m.normalView()), m.width, m.height)
 	}
@@ -245,6 +292,51 @@ func (m AppModel) normalView() string {
 }
 
 const dialogContentW = 38
+
+const presetDialogW = 52
+
+func (m AppModel) renderPresetsDialog() string {
+	center := lipgloss.NewStyle().Width(presetDialogW).Align(lipgloss.Center)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render("Launch Preset")
+	cursor := lipgloss.NewStyle().Foreground(lipgloss.Color("62")).Bold(true).Render("▶")
+	selectedName := lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+	normalName := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	cmdStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+
+	lines := []string{center.Render(title), ""}
+
+	if len(m.presets) == 0 {
+		lines = append(lines,
+			dim.Render("No presets configured."),
+			"",
+			dim.Render(fmt.Sprintf("Add entries to %s", config.DefaultPath())),
+		)
+	} else {
+		for i, p := range m.presets {
+			cmd := p.Command
+			if len(cmd) > presetDialogW-2 {
+				cmd = cmd[:presetDialogW-5] + "…"
+			}
+			if i == m.presetsIdx {
+				lines = append(lines,
+					cursor+" "+selectedName.Render(p.Name),
+					"  "+cmdStyle.Render(cmd),
+				)
+			} else {
+				lines = append(lines,
+					"  "+normalName.Render(p.Name),
+					"  "+cmdStyle.Render(cmd),
+				)
+			}
+		}
+	}
+
+	lines = append(lines, "", center.Render(dim.Render("↑/↓:select  enter:run  esc:cancel")))
+	return dialogStyle.BorderForeground(lipgloss.Color("62")).Render(
+		lipgloss.JoinVertical(lipgloss.Left, lines...),
+	)
+}
 
 func (m AppModel) renderDeleteConfirmDialog() string {
 	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
@@ -343,7 +435,7 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	hint := "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  q:quit"
+	hint := "r:refresh  enter/l:logs  i:inspect  s:start  t:stop  p:pause  u:unpause  d:delete  P:prune  L:presets  q:quit"
 	return statusStyle.Width(m.width).Render(hint)
 }
 

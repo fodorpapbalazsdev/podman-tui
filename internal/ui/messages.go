@@ -57,5 +57,10 @@ type ShowDeleteConfirmMsg struct {
 	Container models.Container
 }
 
+// PresetRunDoneMsg is sent after a preset command finishes executing.
+type PresetRunDoneMsg struct {
+	Err error
+}
+
 // autoRefreshMsg is sent by the periodic tick to trigger a background refresh.
 type autoRefreshMsg struct{}

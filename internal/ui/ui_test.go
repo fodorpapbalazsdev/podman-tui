@@ -238,21 +238,21 @@ func TestContainersModel_AutoRefresh_SkipsWhenFetching(t *testing.T) {
 // ---- AppModel navigation ----
 
 func TestAppModel_ShowLogsMsg_DispatchesCmd(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	con := models.Container{ID: "abc123", Name: "web"}
 	_, cmd := m.Update(ShowLogsMsg{Container: con})
 	assert.NotNil(t, cmd, "ShowLogsMsg should dispatch a fetch command")
 }
 
 func TestAppModel_ShowInspectMsg_DispatchesCmd(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	con := models.Container{ID: "abc123", Name: "web"}
 	_, cmd := m.Update(ShowInspectMsg{Container: con})
 	assert.NotNil(t, cmd, "ShowInspectMsg should dispatch a fetch command")
 }
 
 func TestAppModel_QuitKey(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	require.NotNil(t, cmd)
 	_, ok := cmd().(tea.QuitMsg)
@@ -260,7 +260,7 @@ func TestAppModel_QuitKey(t *testing.T) {
 }
 
 func TestAppModel_CtrlCQuit(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	require.NotNil(t, cmd)
 	_, ok := cmd().(tea.QuitMsg)
@@ -270,13 +270,13 @@ func TestAppModel_CtrlCQuit(t *testing.T) {
 // ---- AppModel prune state machine ----
 
 func TestAppModel_PruneKey_SetsPruneConfirm(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'P'}})
 	assert.True(t, newModel.(AppModel).pruneConfirm)
 }
 
 func TestAppModel_PruneConfirm_EnterDispatchesCmd(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	m.pruneConfirm = true
 	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.False(t, newModel.(AppModel).pruneConfirm, "confirm flag should be cleared")
@@ -284,7 +284,7 @@ func TestAppModel_PruneConfirm_EnterDispatchesCmd(t *testing.T) {
 }
 
 func TestAppModel_PruneConfirm_EscCancels(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	m.pruneConfirm = true
 	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	assert.False(t, newModel.(AppModel).pruneConfirm, "confirm flag should be cleared")
@@ -292,7 +292,7 @@ func TestAppModel_PruneConfirm_EscCancels(t *testing.T) {
 }
 
 func TestAppModel_PruneConfirm_OtherKeyCancels(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	m.pruneConfirm = true
 	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	assert.False(t, newModel.(AppModel).pruneConfirm)
@@ -300,7 +300,7 @@ func TestAppModel_PruneConfirm_OtherKeyCancels(t *testing.T) {
 }
 
 func TestAppModel_PruneDoneMsg_Success(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	newModel, cmd := m.Update(PruneDoneMsg{Reclaimed: "293.8 MB"})
 	app := newModel.(AppModel)
 	assert.True(t, app.pruneDone)
@@ -310,7 +310,7 @@ func TestAppModel_PruneDoneMsg_Success(t *testing.T) {
 }
 
 func TestAppModel_PruneDoneMsg_Error(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	newModel, cmd := m.Update(PruneDoneMsg{Err: fmt.Errorf("prune failed")})
 	app := newModel.(AppModel)
 	assert.True(t, app.pruneDone)
@@ -319,7 +319,7 @@ func TestAppModel_PruneDoneMsg_Error(t *testing.T) {
 }
 
 func TestAppModel_PruneDone_AnyKeyDismisses(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	m.pruneDone = true
 	m.pruneReclaimed = "100 MB"
 	newModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
@@ -328,7 +328,7 @@ func TestAppModel_PruneDone_AnyKeyDismisses(t *testing.T) {
 }
 
 func TestAppModel_PruneDone_EnterDismissesWithoutOpeningLogs(t *testing.T) {
-	m := NewAppModel(nil)
+	m := NewAppModel(nil, nil)
 	// Load a container so enter would normally trigger ShowLogsMsg.
 	cons := []models.Container{{ID: "abc123", Name: "web", Status: models.StatusRunning}}
 	m.containers, _ = m.containers.Update(ContainersLoadedMsg{Containers: cons, WithStats: true})

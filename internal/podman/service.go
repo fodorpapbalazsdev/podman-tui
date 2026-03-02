@@ -210,6 +210,23 @@ func (s *Service) GetContainers(all, withStats bool) ([]models.Container, error)
 	return containers, nil
 }
 
+// RunPreset executes a preset command string (everything after "podman").
+// A leading "podman" token is stripped if present.
+func (s *Service) RunPreset(command string) error {
+	args := strings.Fields(command)
+	if len(args) == 0 {
+		return fmt.Errorf("empty preset command")
+	}
+	if args[0] == "podman" {
+		args = args[1:]
+	}
+	_, stderr, code := s.runCommand(args...)
+	if code != 0 {
+		return fmt.Errorf("podman %s", strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
 // StartContainer starts a stopped/created container.
 func (s *Service) StartContainer(id string) error {
 	_, stderr, code := s.runCommand("start", id)

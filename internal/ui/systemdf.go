@@ -159,7 +159,7 @@ func renderUsageBar(usedBytes, totalBytes int64, barWidth int) string {
 
 	bar := filledStyle.Render(strings.Repeat("█", filled)) +
 		barEmpty.Render(strings.Repeat("░", barWidth-filled))
-	info := headerUsageStyle.Render(fmt.Sprintf("%s · %d%%", formatBytesGiB(usedBytes), int(pct*100)))
+	info := headerUsageStyle.Render(fmt.Sprintf("%8s · %2d%%", formatBytesGiB(usedBytes), int(pct*100)))
 	return bar + " " + info
 }
 
@@ -213,8 +213,15 @@ func (m SystemDFModel) HeaderView(width int) string {
 		left[0] = indent + stat("Machine", mi.Name)
 		left[1] = indent + stat("CPU", fmt.Sprintf("%d", mi.CPUs))
 
-		memPart := stat("Mem", formatMachineMem(mi.MemoryMB))
-		diskPart := stat("Disk", fmt.Sprintf("%d GiB", mi.DiskGB))
+		// Render Mem and Disk with a fixed-width label+value so the usage
+		// bars always start in the same column regardless of digit count.
+		const usageValW = 9 // wide enough for "16.0 GiB"
+		alignedStat := func(label, val string) string {
+			return headerLabelStyle.Render(fmt.Sprintf("%-6s", label+":")) +
+				headerValueStyle.Render(fmt.Sprintf("%*s", usageValW, val))
+		}
+		memPart := alignedStat("Mem", formatMachineMem(mi.MemoryMB))
+		diskPart := alignedStat("Disk", fmt.Sprintf("%.1f GiB", float64(mi.DiskGB)))
 		if si := m.systemInfo; si != nil {
 			if si.MemTotalBytes > 0 {
 				memPart += " " + renderUsageBar(si.MemTotalBytes-si.MemFreeBytes, si.MemTotalBytes, 12)

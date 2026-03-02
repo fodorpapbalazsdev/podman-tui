@@ -534,28 +534,36 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	parts := []string{"r:refresh"}
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("│")
 
+	var actions []string
 	if group := m.containers.selectedGroupName(); group != "" {
 		if m.containers.groupHasStartable(group) {
-			parts = append(parts, "s:start")
+			actions = append(actions, "s:start")
 		}
 		if m.containers.groupHasStoppable(group) {
-			parts = append(parts, "t:stop")
+			actions = append(actions, "t:stop")
 		}
 	} else if con := m.containers.selectedContainer(); con != nil {
-		parts = append(parts, "enter/l:logs", "i:inspect", "p:ports")
+		actions = append(actions, "enter/l:logs", "i:inspect", "p:ports")
 		if con.Status != models.StatusRunning {
-			parts = append(parts, "s:start")
+			actions = append(actions, "s:start")
 		}
 		if con.Status == models.StatusRunning || con.Status == models.StatusPaused {
-			parts = append(parts, "t:stop", "m:more")
+			actions = append(actions, "t:stop", "m:more")
 		}
-		parts = append(parts, "d:delete")
+		actions = append(actions, "d:delete")
 	}
 
-	parts = append(parts, "P:prune", "L:presets", "ng:jump", "q:quit")
-	return statusStyle.Width(m.width).Render(strings.Join(parts, "  "))
+	globals := []string{"r:refresh", "P:prune", "L:presets", "ng:jump", "q:quit"}
+
+	var hint string
+	if len(actions) > 0 {
+		hint = strings.Join(actions, "  ") + "  " + sep + "  " + strings.Join(globals, "  ")
+	} else {
+		hint = strings.Join(globals, "  ")
+	}
+	return statusStyle.Width(m.width).Render(hint)
 }
 
 func (m AppModel) pruneCmd() tea.Cmd {

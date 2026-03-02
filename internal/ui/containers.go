@@ -54,7 +54,7 @@ func newContainersModel(svc *podman.Service) ContainersModel {
 		{Title: "#", Width: 2},
 		{Title: "Name", Width: 20},
 		{Title: "ID", Width: 12},
-		{Title: "Image", Width: 30},
+		{Title: "Image", Width: 40},
 		{Title: "Status", Width: 10},
 		{Title: "Ports", Width: 20},
 		{Title: "Memory", Width: 12},
@@ -346,19 +346,19 @@ func (m *ContainersModel) SetSize(w, h int) {
 	m.height = h
 	m.table.SetHeight(h - 1) // reserve 1 row for title
 	// Distribute column widths proportionally
-	nameW := w * 18 / 100
+	nameW := w * 16 / 100
 	idW := 13
-	imgW := w * 25 / 100
+	imgW := w * 30 / 100
 	statusW := 10
-	portsW := w * 18 / 100
+	portsW := w * 14 / 100
 	memW := 15
 	cpuW := 8
 	// clamp
 	if nameW < 10 {
 		nameW = 10
 	}
-	if imgW < 15 {
-		imgW = 15
+	if imgW < 20 {
+		imgW = 20
 	}
 	if portsW < 12 {
 		portsW = 12
@@ -607,7 +607,7 @@ func containerRow(c models.Container, pendingID string, inGroup bool, num int, n
 		fmt.Sprintf("%*d", numWidth, num),
 		name,
 		shortID,
-		truncate(c.Image, 30),
+		c.Image,
 		status,
 		formatPorts(c.Ports),
 		formatMemory(c.MemoryUsage),

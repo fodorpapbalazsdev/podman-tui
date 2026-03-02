@@ -107,7 +107,7 @@ func TestContainersToRows_Fields(t *testing.T) {
 	rows := containersToRows(cons)
 	require.Len(t, rows, 1)
 	r := rows[0]
-	assert.Equal(t, "1", r[0]) // line number
+	assert.Equal(t, " 1", r[0]) // line number
 	assert.Equal(t, "web", r[1])
 	assert.Equal(t, "abc123def456", r[2]) // ID truncated to 12 chars
 	assert.Equal(t, "nginx:latest", r[3])
@@ -146,8 +146,8 @@ func TestBuildGroupedRows_ComposeGroupsFirst(t *testing.T) {
 	assert.Equal(t, "", rows[0][2], "group header should have empty ID")
 
 	// rows 1 & 2: compose containers (sorted by name: db, web) — indented
-	assert.Equal(t, "  db", rows[1][1])
-	assert.Equal(t, "  web", rows[2][1])
+	assert.Equal(t, " db", rows[1][1])
+	assert.Equal(t, " web", rows[2][1])
 
 	// row 3: separator between group and standalone
 	assert.Equal(t, "", rows[3][2], "separator row should have empty ID")

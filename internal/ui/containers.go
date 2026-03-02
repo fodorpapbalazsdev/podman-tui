@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,9 @@ const (
 	statusColWidth           = 10
 	pendingStatusPlaceholder = "pending   " // exactly statusColWidth visible chars; not a real status
 )
+
+// groupStatusRe matches the "X/Y up" summary injected into group header rows.
+var groupStatusRe = regexp.MustCompile(`(\d+)/(\d+) up`)
 
 // ContainersModel is the Bubble Tea model for the containers pane.
 type ContainersModel struct {
@@ -77,7 +81,7 @@ func newContainersModel(svc *podman.Service) ContainersModel {
 		table:    t,
 		spinner:  sp,
 		service:  svc,
-		numWidth: 1,
+		numWidth: 2,
 	}
 }
 
@@ -363,9 +367,10 @@ func (m *ContainersModel) confirmDelete(id string, force bool) tea.Cmd {
 // rebuildRows rebuilds the table with compose grouping and the action spinner placeholder.
 // It also recomputes numberMap and numWidth so digit-jump and column alignment stay correct.
 func (m *ContainersModel) rebuildRows(containers []models.Container) {
-	// Compute how many digits the largest container number needs.
-	numWidth := 1
-	if n := len(containers); n >= 10 {
+	// Compute how many digits the largest container number needs (minimum 2 so
+	// both numbers and ◆ always have a leading space, e.g. " 1", " ◆").
+	numWidth := 2
+	if n := len(containers); n >= 100 {
 		numWidth = len(strconv.Itoa(n))
 	}
 	if numWidth != m.numWidth {
@@ -501,7 +506,15 @@ func buildGroupedRows(containers []models.Container, pendingID string, numWidth 
 		}
 		// Group header row: # column holds right-aligned ◆, name column holds the project label;
 		// ID column is empty so selectedContainer() skips it.
-		rows = append(rows, table.Row{groupIndicator, g.project, "", "", "", "", "", ""})
+		// Status column shows "X/Y up" for the group.
+		running := 0
+		for _, c := range g.containers {
+			if c.Status == models.StatusRunning {
+				running++
+			}
+		}
+		groupStatus := fmt.Sprintf("%d/%d up", running, len(g.containers))
+		rows = append(rows, table.Row{groupIndicator, g.project, "", "", groupStatus, "", "", ""})
 		for _, c := range g.containers {
 			containerNum++
 			rows = append(rows, containerRow(c, pendingID, true, containerNum, numWidth))
@@ -528,7 +541,7 @@ func containerRow(c models.Container, pendingID string, inGroup bool, num int, n
 	}
 	name := c.Name
 	if inGroup {
-		name = "  " + name
+		name = " " + name
 	}
 	return table.Row{
 		fmt.Sprintf("%*d", numWidth, num),
@@ -579,7 +592,7 @@ func containersToRows(containers []models.Container) []table.Row {
 		}
 		ports := formatPorts(c.Ports)
 		rows = append(rows, table.Row{
-			fmt.Sprintf("%d", i+1),
+			fmt.Sprintf("%2d", i+1),
 			c.Name,
 			shortID,
 			truncate(c.Image, 30),
@@ -604,9 +617,22 @@ func colorizeGroupHeaders(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		if strings.Contains(line, "◆") {
-			// Collapse the two-space inter-cell gap (right-pad of # cell + left-pad of
-			// Name cell) so the project name renders immediately after ◆.
-			line = strings.Replace(line, "◆  ", "◆ ", 1)
+			// Colorize the "X/Y up" status: green = all up, amber = partial, red = none.
+			line = groupStatusRe.ReplaceAllStringFunc(line, func(match string) string {
+				sub := groupStatusRe.FindStringSubmatch(match)
+				running, _ := strconv.Atoi(sub[1])
+				total, _ := strconv.Atoi(sub[2])
+				var color string
+				switch {
+				case running == total:
+					color = "82"  // green
+				case running == 0:
+					color = "196" // red
+				default:
+					color = "214" // amber
+				}
+				return fmt.Sprintf("\x1b[2m\x1b[38;5;%sm%s\x1b[22m\x1b[1m\x1b[38;5;62m", color, match)
+			})
 			lines[i] = "\x1b[1m\x1b[38;5;62m" + line + "\x1b[22m\x1b[39m"
 		} else if len(line) > 0 && strings.TrimSpace(line) == "" {
 			// All-whitespace line: only render as a dim horizontal rule when

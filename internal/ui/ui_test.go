@@ -107,7 +107,7 @@ func TestContainersToRows_Fields(t *testing.T) {
 	rows := containersToRows(cons)
 	require.Len(t, rows, 1)
 	r := rows[0]
-	assert.Equal(t, " 1", r[0]) // line number
+	assert.Equal(t, "1", r[0]) // line number
 	assert.Equal(t, "web", r[1])
 	assert.Equal(t, "abc123def456", r[2]) // ID truncated to 12 chars
 	assert.Equal(t, "nginx:latest", r[3])
@@ -137,11 +137,12 @@ func TestBuildGroupedRows_ComposeGroupsFirst(t *testing.T) {
 		{ID: "bbb", Name: "web", Status: models.StatusRunning, ComposeProject: "myapp"},
 		{ID: "ccc", Name: "db", Status: models.StatusRunning, ComposeProject: "myapp"},
 	}
-	rows := buildGroupedRows(containers, "")
+	rows := buildGroupedRows(containers, "", 1)
 
 	// row 0: group header for "myapp"
 	require.Greater(t, len(rows), 0)
-	assert.Equal(t, "◆ myapp", rows[0][1])
+	assert.Equal(t, "◆", rows[0][0])
+	assert.Equal(t, "myapp", rows[0][1])
 	assert.Equal(t, "", rows[0][2], "group header should have empty ID")
 
 	// rows 1 & 2: compose containers (sorted by name: db, web) — indented
@@ -160,7 +161,7 @@ func TestBuildGroupedRows_PendingStatusPlaceholder(t *testing.T) {
 	containers := []models.Container{
 		{ID: "abc123def456", Name: "web", Status: models.StatusRunning, ComposeProject: "myapp"},
 	}
-	rows := buildGroupedRows(containers, "abc123def456")
+	rows := buildGroupedRows(containers, "abc123def456", 1)
 
 	// row 0 is header, row 1 is the container
 	require.Len(t, rows, 2)
@@ -172,7 +173,7 @@ func TestBuildGroupedRows_NoCompose(t *testing.T) {
 		{ID: "bbb", Name: "beta", Status: models.StatusRunning},
 		{ID: "aaa", Name: "alpha", Status: models.StatusRunning},
 	}
-	rows := buildGroupedRows(containers, "")
+	rows := buildGroupedRows(containers, "", 1)
 
 	// No group headers; sorted by name.
 	require.Len(t, rows, 2)

@@ -34,6 +34,7 @@ type ContainersModel struct {
 	containers      []models.Container
 	rows            []table.Row // mirrors what is in m.table; used for row-type checks
 	numberMap       []int       // numberMap[i] = table row index of container number i+1
+	numWidth        int         // digits needed for the largest container number (1 for ≤9, 2 for ≤99, …)
 	digitBuf        string      // accumulates typed digits for nG jump (e.g. "10" → press g → jump to #10)
 	width           int
 	height          int
@@ -73,9 +74,10 @@ func newContainersModel(svc *podman.Service) ContainersModel {
 	t.SetStyles(ts)
 
 	return ContainersModel{
-		table:   t,
-		spinner: sp,
-		service: svc,
+		table:    t,
+		spinner:  sp,
+		service:  svc,
+		numWidth: 1,
 	}
 }
 
@@ -318,8 +320,12 @@ func (m *ContainersModel) SetSize(w, h int) {
 	if portsW < 12 {
 		portsW = 12
 	}
+	numW := m.numWidth
+	if numW < 1 {
+		numW = 1
+	}
 	m.table.SetColumns([]table.Column{
-		{Title: "#", Width: 2},
+		{Title: "#", Width: numW},
 		{Title: "Name", Width: nameW},
 		{Title: "ID", Width: idW},
 		{Title: "Image", Width: imgW},
@@ -355,9 +361,21 @@ func (m *ContainersModel) confirmDelete(id string, force bool) tea.Cmd {
 }
 
 // rebuildRows rebuilds the table with compose grouping and the action spinner placeholder.
-// It also recomputes numberMap so digit keys can jump to the right table row.
+// It also recomputes numberMap and numWidth so digit-jump and column alignment stay correct.
 func (m *ContainersModel) rebuildRows(containers []models.Container) {
-	m.rows = buildGroupedRows(containers, m.actionPendingID)
+	// Compute how many digits the largest container number needs.
+	numWidth := 1
+	if n := len(containers); n >= 10 {
+		numWidth = len(strconv.Itoa(n))
+	}
+	if numWidth != m.numWidth {
+		m.numWidth = numWidth
+		if m.width > 0 {
+			m.SetSize(m.width, m.height) // recompute column widths with new numWidth
+		}
+	}
+
+	m.rows = buildGroupedRows(containers, m.actionPendingID, numWidth)
 	m.table.SetRows(m.rows)
 	m.numberMap = nil
 	for i, row := range m.rows {
@@ -375,7 +393,7 @@ func (m *ContainersModel) skipSeparatorRows(dir int) {
 	for cursor >= 0 && cursor < len(m.rows) {
 		row := m.rows[cursor]
 		// Stop at real container rows or group-header rows; skip blank separator rows.
-		if row[2] != "" || strings.HasPrefix(row[1], "◆ ") {
+		if row[2] != "" || row[0] == "◆" {
 			break
 		}
 		cursor += dir
@@ -389,10 +407,10 @@ func (m *ContainersModel) skipSeparatorRows(dir int) {
 // group-header row, or "" otherwise.
 func (m *ContainersModel) selectedGroupName() string {
 	row := m.table.SelectedRow()
-	if row == nil {
+	if row == nil || row[0] != "◆" {
 		return ""
 	}
-	return strings.TrimPrefix(row[1], "◆ ")
+	return row[1]
 }
 
 // startGroupCmd starts all non-running containers that belong to project.
@@ -439,7 +457,9 @@ func (m ContainersModel) stopGroupCmd(project string) tea.Cmd {
 // Compose groups appear first (alphabetically), each preceded by a header row;
 // standalone containers follow. Within each group containers are sorted by name.
 // If pendingID is non-empty, that container's status cell gets the spinner placeholder.
-func buildGroupedRows(containers []models.Container, pendingID string) []table.Row {
+// numWidth is the digit-width of the largest container number, used to right-align
+// the # column values.
+func buildGroupedRows(containers []models.Container, pendingID string, numWidth int) []table.Row {
 	type group struct {
 		project    string
 		containers []models.Container
@@ -471,6 +491,7 @@ func buildGroupedRows(containers []models.Container, pendingID string) []table.R
 	sort.Slice(standalone, func(i, j int) bool { return standalone[i].Name < standalone[j].Name })
 
 	sep := table.Row{"", "", "", "", "", "", "", ""}
+	groupIndicator := strings.Repeat(" ", numWidth-1) + "◆"
 
 	var rows []table.Row
 	containerNum := 0
@@ -478,12 +499,12 @@ func buildGroupedRows(containers []models.Container, pendingID string) []table.R
 		if i > 0 {
 			rows = append(rows, sep)
 		}
-		// Group header row: name column holds the project label; ID column is empty
-		// so selectedContainer() skips it (empty ID never matches a real container).
-		rows = append(rows, table.Row{"", "◆ " + g.project, "", "", "", "", "", ""})
+		// Group header row: # column holds right-aligned ◆, name column holds the project label;
+		// ID column is empty so selectedContainer() skips it.
+		rows = append(rows, table.Row{groupIndicator, g.project, "", "", "", "", "", ""})
 		for _, c := range g.containers {
 			containerNum++
-			rows = append(rows, containerRow(c, pendingID, true, containerNum))
+			rows = append(rows, containerRow(c, pendingID, true, containerNum, numWidth))
 		}
 	}
 	if len(groups) > 0 && len(standalone) > 0 {
@@ -491,12 +512,12 @@ func buildGroupedRows(containers []models.Container, pendingID string) []table.R
 	}
 	for _, c := range standalone {
 		containerNum++
-		rows = append(rows, containerRow(c, pendingID, false, containerNum))
+		rows = append(rows, containerRow(c, pendingID, false, containerNum, numWidth))
 	}
 	return rows
 }
 
-func containerRow(c models.Container, pendingID string, inGroup bool, num int) table.Row {
+func containerRow(c models.Container, pendingID string, inGroup bool, num int, numWidth int) table.Row {
 	shortID := c.ID
 	if len(shortID) > 12 {
 		shortID = shortID[:12]
@@ -510,7 +531,7 @@ func containerRow(c models.Container, pendingID string, inGroup bool, num int) t
 		name = "  " + name
 	}
 	return table.Row{
-		fmt.Sprintf("%2d", num),
+		fmt.Sprintf("%*d", numWidth, num),
 		name,
 		shortID,
 		truncate(c.Image, 30),
@@ -558,7 +579,7 @@ func containersToRows(containers []models.Container) []table.Row {
 		}
 		ports := formatPorts(c.Ports)
 		rows = append(rows, table.Row{
-			fmt.Sprintf("%2d", i+1),
+			fmt.Sprintf("%d", i+1),
 			c.Name,
 			shortID,
 			truncate(c.Image, 30),
@@ -582,7 +603,10 @@ func containersToRows(containers []models.Container) []table.Row {
 func colorizeGroupHeaders(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		if strings.Contains(line, "◆ ") {
+		if strings.Contains(line, "◆") {
+			// Collapse the two-space inter-cell gap (right-pad of # cell + left-pad of
+			// Name cell) so the project name renders immediately after ◆.
+			line = strings.Replace(line, "◆  ", "◆ ", 1)
 			lines[i] = "\x1b[1m\x1b[38;5;62m" + line + "\x1b[22m\x1b[39m"
 		} else if len(line) > 0 && strings.TrimSpace(line) == "" {
 			// All-whitespace line: only render as a dim horizontal rule when

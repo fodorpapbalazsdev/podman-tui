@@ -470,9 +470,9 @@ func (m AppModel) renderPortsDialog() string {
 	center := lipgloss.NewStyle().Width(dialogContentW).Align(lipgloss.Center)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("62")).Render("Port Forwards")
-	name := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Render(m.portsContainer.Name)
+	name := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("(" + m.portsContainer.Name + ")")
 
-	lines := []string{center.Render(title), "", name, ""}
+	lines := []string{center.Render(title), center.Render(name), ""}
 
 	if len(m.portsContainer.Ports) == 0 {
 		lines = append(lines, dim.Render("no port forwards"))

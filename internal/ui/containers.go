@@ -39,6 +39,7 @@ type ContainersModel struct {
 	rows            []table.Row // mirrors what is in m.table; used for row-type checks
 	numberMap       []int       // numberMap[i] = table row index of container number i+1
 	numWidth        int         // digits needed for the largest container number (1 for ≤9, 2 for ≤99, …)
+	flashMsg        string      // transient status hint shown in the title; cleared on the next keypress
 	digitBuf        string      // accumulates typed digits for nG jump (e.g. "10" → press g → jump to #10)
 	width           int
 	height          int
@@ -162,6 +163,7 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 		cmds = append(cmds, m.spinner.Tick, m.fetchContainers())
 
 	case tea.KeyMsg:
+		m.flashMsg = "" // clear on every keypress
 		if !m.focused {
 			break
 		}
@@ -184,44 +186,78 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 			if group := m.selectedGroupName(); group != "" {
 				cmds = append(cmds, m.startGroupCmd(group))
 			} else if con := m.selectedContainer(); con != nil {
-				id := con.ID
-				m.actionPendingID = id
-				m.rebuildRows(m.containers)
-				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.StartContainer(id)}
-				})
+				if con.Status == models.StatusRunning {
+					m.flashMsg = "container is already running"
+				} else {
+					id := con.ID
+					isPaused := con.Status == models.StatusPaused
+					svc := m.service
+					m.actionPendingID = id
+					m.rebuildRows(m.containers)
+					cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
+						var err error
+						if isPaused {
+							err = svc.UnpauseContainer(id)
+						} else {
+							err = svc.StartContainer(id)
+						}
+						return ContainerActionDoneMsg{Err: err}
+					})
+				}
 			}
 
 		case "t":
 			if group := m.selectedGroupName(); group != "" {
 				cmds = append(cmds, m.stopGroupCmd(group))
 			} else if con := m.selectedContainer(); con != nil {
-				id := con.ID
-				m.actionPendingID = id
-				m.rebuildRows(m.containers)
-				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.StopContainer(id)}
-				})
+				if con.Status != models.StatusRunning && con.Status != models.StatusPaused {
+					m.flashMsg = "container is already stopped"
+				} else {
+					id := con.ID
+					isPaused := con.Status == models.StatusPaused
+					svc := m.service
+					m.actionPendingID = id
+					m.rebuildRows(m.containers)
+					cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
+						if isPaused {
+							if err := svc.UnpauseContainer(id); err != nil {
+								return ContainerActionDoneMsg{Err: err}
+							}
+						}
+						return ContainerActionDoneMsg{Err: svc.StopContainer(id)}
+					})
+				}
 			}
 
 		case "p":
 			if con := m.selectedContainer(); con != nil {
-				id := con.ID
-				m.actionPendingID = id
-				m.rebuildRows(m.containers)
-				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.PauseContainer(id)}
-				})
+				switch con.Status {
+				case models.StatusRunning:
+					id := con.ID
+					m.actionPendingID = id
+					m.rebuildRows(m.containers)
+					cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
+						return ContainerActionDoneMsg{Err: m.service.PauseContainer(id)}
+					})
+				case models.StatusPaused:
+					m.flashMsg = "container is already paused"
+				default:
+					m.flashMsg = "container is not running"
+				}
 			}
 
 		case "u":
 			if con := m.selectedContainer(); con != nil {
-				id := con.ID
-				m.actionPendingID = id
-				m.rebuildRows(m.containers)
-				cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
-					return ContainerActionDoneMsg{Err: m.service.UnpauseContainer(id)}
-				})
+				if con.Status == models.StatusPaused {
+					id := con.ID
+					m.actionPendingID = id
+					m.rebuildRows(m.containers)
+					cmds = append(cmds, m.spinner.Tick, func() tea.Msg {
+						return ContainerActionDoneMsg{Err: m.service.UnpauseContainer(id)}
+					})
+				} else {
+					m.flashMsg = "container is not paused"
+				}
 			}
 
 		case "d":
@@ -277,6 +313,9 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 
 func (m ContainersModel) View() string {
 	title := titleStyle.Render("Containers")
+	if m.flashMsg != "" {
+		title = title + "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(m.flashMsg)
+	}
 	if m.digitBuf != "" {
 		jump := lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render(m.digitBuf)
 		title = title + "  " + jump
@@ -419,18 +458,29 @@ func (m *ContainersModel) selectedGroupName() string {
 }
 
 // startGroupCmd starts all non-running containers that belong to project.
+// Paused containers are unpaused; stopped/created containers are started.
 func (m ContainersModel) startGroupCmd(project string) tea.Cmd {
-	var ids []string
+	type entry struct {
+		id     string
+		paused bool
+	}
+	var entries []entry
 	for _, c := range m.containers {
 		if c.ComposeProject == project && c.Status != models.StatusRunning {
-			ids = append(ids, c.ID)
+			entries = append(entries, entry{id: c.ID, paused: c.Status == models.StatusPaused})
 		}
 	}
 	svc := m.service
 	return func() tea.Msg {
 		var lastErr error
-		for _, id := range ids {
-			if err := svc.StartContainer(id); err != nil {
+		for _, e := range entries {
+			var err error
+			if e.paused {
+				err = svc.UnpauseContainer(e.id)
+			} else {
+				err = svc.StartContainer(e.id)
+			}
+			if err != nil {
 				lastErr = err
 			}
 		}
@@ -442,7 +492,7 @@ func (m ContainersModel) startGroupCmd(project string) tea.Cmd {
 func (m ContainersModel) stopGroupCmd(project string) tea.Cmd {
 	var ids []string
 	for _, c := range m.containers {
-		if c.ComposeProject == project && c.Status == models.StatusRunning {
+		if c.ComposeProject == project && (c.Status == models.StatusRunning || c.Status == models.StatusPaused) {
 			ids = append(ids, c.ID)
 		}
 	}

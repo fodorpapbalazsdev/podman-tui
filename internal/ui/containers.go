@@ -32,8 +32,9 @@ type ContainersModel struct {
 	err             error
 	service         *podman.Service
 	containers      []models.Container
-	numberMap       []int   // numberMap[i] = table row index of container number i+1
-	digitBuf        string  // accumulates typed digits for nG jump (e.g. "10" → press g → jump to #10)
+	rows            []table.Row // mirrors what is in m.table; used for row-type checks
+	numberMap       []int       // numberMap[i] = table row index of container number i+1
+	digitBuf        string      // accumulates typed digits for nG jump (e.g. "10" → press g → jump to #10)
 	width           int
 	height          int
 }
@@ -234,6 +235,20 @@ func (m ContainersModel) Update(msg tea.Msg) (ContainersModel, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 
+		case "up", "k":
+			m.digitBuf = ""
+			var cmd tea.Cmd
+			m.table, cmd = m.table.Update(msg)
+			cmds = append(cmds, cmd)
+			m.skipNonContainerRows(-1)
+
+		case "down", "j":
+			m.digitBuf = ""
+			var cmd tea.Cmd
+			m.table, cmd = m.table.Update(msg)
+			cmds = append(cmds, cmd)
+			m.skipNonContainerRows(1)
+
 		default:
 			m.digitBuf = ""
 			var cmd tea.Cmd
@@ -338,13 +353,25 @@ func (m *ContainersModel) confirmDelete(id string, force bool) tea.Cmd {
 // rebuildRows rebuilds the table with compose grouping and the action spinner placeholder.
 // It also recomputes numberMap so digit keys can jump to the right table row.
 func (m *ContainersModel) rebuildRows(containers []models.Container) {
-	rows := buildGroupedRows(containers, m.actionPendingID)
-	m.table.SetRows(rows)
+	m.rows = buildGroupedRows(containers, m.actionPendingID)
+	m.table.SetRows(m.rows)
 	m.numberMap = nil
-	for i, row := range rows {
+	for i, row := range m.rows {
 		if row[2] != "" { // non-empty ID column = actual container row
 			m.numberMap = append(m.numberMap, i)
 		}
+	}
+}
+
+// skipNonContainerRows advances the table cursor past separator and group-header rows
+// in the given direction (+1 = down, -1 = up).
+func (m *ContainersModel) skipNonContainerRows(dir int) {
+	cursor := m.table.Cursor()
+	for cursor >= 0 && cursor < len(m.rows) && m.rows[cursor][2] == "" {
+		cursor += dir
+	}
+	if cursor >= 0 && cursor < len(m.rows) {
+		m.table.SetCursor(cursor)
 	}
 }
 

@@ -139,7 +139,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if m.deleteConfirmContainer != nil {
 			if msg.String() == "enter" {
-				force := m.deleteConfirmContainer.Status == models.StatusRunning
+				force := m.deleteConfirmContainer.Status == models.StatusRunning || m.deleteConfirmContainer.Status == models.StatusPaused
 				cmds = append(cmds, m.containers.confirmDelete(m.deleteConfirmContainer.ID, force))
 			}
 			m.deleteConfirmContainer = nil
@@ -349,11 +349,11 @@ func (m AppModel) renderDeleteConfirmDialog() string {
 		"",
 		"Remove " + name + "?",
 	}
-	if m.deleteConfirmContainer.Status == models.StatusRunning {
+	if m.deleteConfirmContainer.Status == models.StatusRunning || m.deleteConfirmContainer.Status == models.StatusPaused {
 		lines = append(lines,
 			"",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("⚠ Container is running."),
-			dim.Render("It will be force-stopped first."),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true).Render("⚠ Container is running/paused."),
+			dim.Render("It will be force-removed."),
 		)
 	} else {
 		lines = append(lines, dim.Render("This cannot be undone."))

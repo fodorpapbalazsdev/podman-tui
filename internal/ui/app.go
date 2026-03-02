@@ -534,7 +534,12 @@ func (m AppModel) mainHeight() int {
 }
 
 func (m *AppModel) renderStatusBar() string {
-	hint := "r:refresh  enter/l:logs  i:inspect  p:ports  s:start  t:stop  m:more  d:delete  P:prune  L:presets  ng:jump  q:quit"
+	var hint string
+	if m.containers.selectedGroupName() != "" {
+		hint = "r:refresh  s:start  t:stop  P:prune  L:presets  ng:jump  q:quit"
+	} else {
+		hint = "r:refresh  enter/l:logs  i:inspect  p:ports  s:start  t:stop  m:more  d:delete  P:prune  L:presets  ng:jump  q:quit"
+	}
 	return statusStyle.Width(m.width).Render(hint)
 }
 

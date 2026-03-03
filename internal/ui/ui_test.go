@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,6 +12,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fpbpi/podman-tui/internal/models"
 )
+
+// stripANSI removes ANSI escape sequences so tests can assert on visible text.
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 // ---- formatMachineMem ----
 
@@ -490,4 +496,229 @@ func TestPlaceOverlay_PadsShortBackgroundLines(t *testing.T) {
 	// Should not panic.
 	result := placeOverlay(fg, bg, 10, 3)
 	assert.NotEmpty(t, result)
+}
+
+// ---- formatBytesGiB ----
+
+func TestFormatBytesGiB(t *testing.T) {
+	gib := int64(1024 * 1024 * 1024)
+	mib := int64(1024 * 1024)
+	for _, tc := range []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 MiB"},
+		{512 * mib, "512 MiB"},
+		{gib, "1.0 GiB"},
+		{int64(float64(gib) * 5.4), "5.4 GiB"},
+		{16 * gib, "16.0 GiB"},
+	} {
+		assert.Equal(t, tc.want, formatBytesGiB(tc.in), "formatBytesGiB(%d)", tc.in)
+	}
+}
+
+// ---- renderUsageBar ----
+
+func TestRenderUsageBar_HalfFull(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	plain := stripANSI(renderUsageBar(5*gib, 10*gib, 10))
+	assert.Contains(t, plain, "█████░░░░░", "half-full bar should have 5 filled and 5 empty blocks")
+	assert.Contains(t, plain, "5.0 GiB")
+	assert.Contains(t, plain, "50%")
+}
+
+func TestRenderUsageBar_ZeroTotal(t *testing.T) {
+	plain := stripANSI(renderUsageBar(0, 0, 10))
+	assert.Contains(t, plain, "░░░░░░░░░░", "zero-total bar should be fully empty")
+	assert.Contains(t, plain, " 0%")
+}
+
+func TestRenderUsageBar_FullWidth(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	plain := stripANSI(renderUsageBar(10*gib, 10*gib, 10))
+	assert.Contains(t, plain, "██████████", "fully used bar should be all filled")
+	assert.Contains(t, plain, "100%")
+}
+
+// ---- groupHasStartable / groupHasStoppable ----
+
+func TestGroupHelpers_MixedGroup(t *testing.T) {
+	m := newContainersModel(nil)
+	cons := []models.Container{
+		{ID: "a", Name: "web", Status: models.StatusRunning, ComposeProject: "app"},
+		{ID: "b", Name: "db", Status: models.StatusExited, ComposeProject: "app"},
+	}
+	m, _ = m.Update(ContainersLoadedMsg{Containers: cons, WithStats: false})
+	assert.True(t, m.groupHasStartable("app"), "exited container makes group startable")
+	assert.True(t, m.groupHasStoppable("app"), "running container makes group stoppable")
+}
+
+func TestGroupHelpers_AllRunning(t *testing.T) {
+	m := newContainersModel(nil)
+	cons := []models.Container{
+		{ID: "a", Name: "web", Status: models.StatusRunning, ComposeProject: "app"},
+	}
+	m, _ = m.Update(ContainersLoadedMsg{Containers: cons, WithStats: false})
+	assert.False(t, m.groupHasStartable("app"), "all running → nothing to start")
+	assert.True(t, m.groupHasStoppable("app"))
+}
+
+func TestGroupHelpers_AllStopped(t *testing.T) {
+	m := newContainersModel(nil)
+	cons := []models.Container{
+		{ID: "a", Name: "web", Status: models.StatusExited, ComposeProject: "app"},
+	}
+	m, _ = m.Update(ContainersLoadedMsg{Containers: cons, WithStats: false})
+	assert.True(t, m.groupHasStartable("app"))
+	assert.False(t, m.groupHasStoppable("app"), "all stopped → nothing to stop")
+}
+
+func TestGroupHelpers_UnknownProject(t *testing.T) {
+	m := newContainersModel(nil)
+	cons := []models.Container{
+		{ID: "a", Name: "web", Status: models.StatusRunning, ComposeProject: "app"},
+	}
+	m, _ = m.Update(ContainersLoadedMsg{Containers: cons, WithStats: false})
+	assert.False(t, m.groupHasStartable("other"))
+	assert.False(t, m.groupHasStoppable("other"))
+}
+
+// ---- "more actions" dialog flow ----
+
+// appWithMoreContainer creates an AppModel with moreContainer set to a container
+// of the given status.
+func appWithMoreContainer(status models.ContainerStatus) AppModel {
+	app := NewAppModel(nil, nil)
+	con := models.Container{ID: "abc123def456", Name: "web", Status: status}
+	app.moreContainer = &con
+	return app
+}
+
+func TestAppModel_ShowMoreMsg_SetsMoreContainer(t *testing.T) {
+	app := NewAppModel(nil, nil)
+	con := models.Container{ID: "abc123", Name: "web", Status: models.StatusRunning}
+	newModel, _ := app.Update(ShowMoreMsg{Container: con})
+	got := newModel.(AppModel)
+	require.NotNil(t, got.moreContainer)
+	assert.Equal(t, "web", got.moreContainer.Name)
+}
+
+func TestAppModel_MoreContainer_PKey_DispatchesForRunning(t *testing.T) {
+	app := appWithMoreContainer(models.StatusRunning)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer, "dialog should be dismissed")
+	assert.NotNil(t, cmd, "p on running container should dispatch pause")
+}
+
+func TestAppModel_MoreContainer_PKey_NoOpWhenNotRunning(t *testing.T) {
+	app := appWithMoreContainer(models.StatusPaused)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer)
+	assert.Nil(t, cmd, "p on non-running container should not dispatch")
+}
+
+func TestAppModel_MoreContainer_UKey_DispatchesForPaused(t *testing.T) {
+	app := appWithMoreContainer(models.StatusPaused)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer)
+	assert.NotNil(t, cmd, "u on paused container should dispatch unpause")
+}
+
+func TestAppModel_MoreContainer_UKey_NoOpWhenNotPaused(t *testing.T) {
+	app := appWithMoreContainer(models.StatusRunning)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer)
+	assert.Nil(t, cmd, "u on non-paused container should not dispatch")
+}
+
+func TestAppModel_MoreContainer_RKey_DispatchesForRunning(t *testing.T) {
+	app := appWithMoreContainer(models.StatusRunning)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer)
+	assert.NotNil(t, cmd, "r on running container should dispatch restart")
+}
+
+func TestAppModel_MoreContainer_RKey_DispatchesForPaused(t *testing.T) {
+	app := appWithMoreContainer(models.StatusPaused)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer)
+	assert.NotNil(t, cmd, "r on paused container should dispatch restart")
+}
+
+func TestAppModel_MoreContainer_RKey_NoOpWhenStopped(t *testing.T) {
+	app := appWithMoreContainer(models.StatusExited)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer)
+	assert.Nil(t, cmd, "r on exited container should not dispatch")
+}
+
+func TestAppModel_MoreContainer_OtherKeyDismissesWithoutAction(t *testing.T) {
+	app := appWithMoreContainer(models.StatusRunning)
+	newModel, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	assert.Nil(t, newModel.(AppModel).moreContainer, "any other key should dismiss the dialog")
+	assert.Nil(t, cmd, "no action should be dispatched")
+}
+
+// ---- port-forwards dialog ----
+
+func TestAppModel_ShowPortsMsg_SetsPortsContainer(t *testing.T) {
+	app := NewAppModel(nil, nil)
+	con := models.Container{ID: "abc123", Name: "web"}
+	newModel, _ := app.Update(ShowPortsMsg{Container: con})
+	got := newModel.(AppModel)
+	require.NotNil(t, got.portsContainer)
+	assert.Equal(t, "web", got.portsContainer.Name)
+}
+
+func TestAppModel_PortsDismiss_AnyKey(t *testing.T) {
+	app := NewAppModel(nil, nil)
+	con := models.Container{ID: "abc123", Name: "web"}
+	app.portsContainer = &con
+	newModel, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	assert.Nil(t, newModel.(AppModel).portsContainer, "any key should close the ports dialog")
+}
+
+// ---- renderStatusBar context-sensitivity ----
+
+// appWithLoadedContainer returns an AppModel with a single container loaded and selected.
+func appWithLoadedContainer(t *testing.T, status models.ContainerStatus) AppModel {
+	t.Helper()
+	app := NewAppModel(nil, nil)
+	cons := []models.Container{{ID: "abc123def456", Name: "web", Status: status}}
+	newModel, _ := app.Update(ContainersLoadedMsg{Containers: cons, WithStats: false})
+	return newModel.(AppModel)
+}
+
+func TestRenderStatusBar_NoSelection(t *testing.T) {
+	app := NewAppModel(nil, nil)
+	hint := stripANSI(app.renderStatusBar())
+	assert.Contains(t, hint, "r:refresh")
+	assert.Contains(t, hint, "q:quit")
+	assert.NotContains(t, hint, "logs")
+	assert.NotContains(t, hint, "d:delete")
+}
+
+func TestRenderStatusBar_RunningContainer(t *testing.T) {
+	app := appWithLoadedContainer(t, models.StatusRunning)
+	hint := stripANSI(app.renderStatusBar())
+	assert.Contains(t, hint, "t:stop")
+	assert.Contains(t, hint, "m:more")
+	assert.Contains(t, hint, "d:delete")
+	assert.NotContains(t, hint, "s:start", "start should not appear for a running container")
+}
+
+func TestRenderStatusBar_PausedContainer(t *testing.T) {
+	app := appWithLoadedContainer(t, models.StatusPaused)
+	hint := stripANSI(app.renderStatusBar())
+	assert.Contains(t, hint, "s:start")
+	assert.Contains(t, hint, "t:stop")
+	assert.Contains(t, hint, "m:more")
+}
+
+func TestRenderStatusBar_ExitedContainer(t *testing.T) {
+	app := appWithLoadedContainer(t, models.StatusExited)
+	hint := stripANSI(app.renderStatusBar())
+	assert.Contains(t, hint, "s:start")
+	assert.NotContains(t, hint, "t:stop", "stop should not appear for an exited container")
+	assert.NotContains(t, hint, "m:more", "more should not appear when no actions are available")
 }

@@ -88,7 +88,7 @@ func runMockPodman() {
 		if len(os.Args) > 2 && os.Args[2] == "inspect" {
 			fmt.Println(mockMachineInspectJSON)
 		}
-	case "start", "stop", "pause", "unpause", "rm":
+	case "start", "stop", "pause", "unpause", "rm", "restart":
 		// success – no output needed
 	default:
 		fmt.Fprintln(os.Stderr, "mock: unknown subcommand: "+sub)
@@ -267,6 +267,16 @@ func TestRemoveContainer(t *testing.T) {
 
 func TestRemoveContainer_Force(t *testing.T) {
 	assert.NoError(t, mockService(t).RemoveContainer("abc123", true))
+}
+
+func TestRestartContainer(t *testing.T) {
+	assert.NoError(t, mockService(t).RestartContainer("abc123"))
+}
+
+func TestRestartContainer_Failure(t *testing.T) {
+	svc := mockService(t)
+	t.Setenv("GO_PODMAN_MOCK_FAIL", "restart")
+	assert.Error(t, svc.RestartContainer("abc123"))
 }
 
 // ---- SystemPrune ----
